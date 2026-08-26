@@ -47,6 +47,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
                 std::cerr << "GoogleIMEEngine: sync daemon returned " << candidates.size() << " candidates\n";
 
+#if HAVE_FCITX5_UI
                 auto candList = std::make_unique<fcitx::CandidateList>();
                 for (size_t i = 0; i < candidates.size(); ++i) {
                     fcitx::Text t(candidates[i]);
@@ -58,6 +59,16 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 panel.setClientPreedit(fcitx::Text(probe));
                 panel.setCandidateList(std::move(candList));
                 ic->updatePreedit();
+#else
+                // UI headers not available: log candidates asynchronously.
+                std::thread worker([candidates](){
+                    std::cerr << "GoogleIMEEngine(fallback async): candidates=" << candidates.size() << "\n";
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        std::cerr << "  fallback cand[" << i << "]=" << candidates[i] << "\n";
+                    }
+                });
+                worker.detach();
+#endif
             } catch (const std::exception &e) {
                 std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
             } catch (...) {
