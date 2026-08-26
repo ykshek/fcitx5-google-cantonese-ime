@@ -34,3 +34,12 @@ build:
 # Quick test against the daemon (requires the daemon to be running)
 curl-suggest q:
     @echo curl "http://127.0.0.1:8765/suggest?q={{q}}&itc=zh-t-i0-pinyin&num=8"
+
+install:
+    #!/usr/bin/env bash
+    sudo cp cpp/build/libfcitx5-google-ime.so /usr/local/lib/fcitx5/modules/
+    sudo cp cpp/build/libfcitx5-google-ime.so /usr/local/lib/fcitx5/
+    sudo cp cpp/data/addon/google-ime.conf /usr/local/share/fcitx5/addon/
+    sudo cp cpp/data/inputmethod/google-ime.conf /usr/local/share/fcitx5/inputmethod/
+    sudo chmod 644 /usr/local/share/fcitx5/addon/google-ime.conf /usr/local/share/fcitx5/inputmethod/google-ime.conf
+    sudo ldconfig
