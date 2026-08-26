@@ -15,3 +15,12 @@ target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core ${CURL_LIBRARIES})
 
 # Installation target
 install(TARGETS fcitx5-google-ime LIBRARY DESTINATION ${FCITX_INSTALL_PKGLIBDIR}/modules)
+
+# Install addon and inputmethod metadata so fcitx5 can discover the engine.
+# Use the install directories provided by the Fcitx5Core package (FCITX_INSTALL_DATADIR)
+# which map to the appropriate share/fcitx5 path for the system.
+install(FILES ${CMAKE_SOURCE_DIR}/data/addon/google-ime.conf DESTINATION ${FCITX_INSTALL_DATADIR}/addon)
+install(FILES ${CMAKE_SOURCE_DIR}/data/inputmethod/google-ime.conf DESTINATION ${FCITX_INSTALL_DATADIR}/inputmethod)
+
+# Optional: install the daemon scripts into datadir for developer convenience
+install(FILES ${CMAKE_SOURCE_DIR}/../daemon/google_tools.py ${CMAKE_SOURCE_DIR}/../daemon/server.py DESTINATION ${FCITX_INSTALL_DATADIR}/google-ime OPTIONAL)
