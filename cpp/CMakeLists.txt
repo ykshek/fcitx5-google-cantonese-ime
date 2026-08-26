@@ -5,10 +5,15 @@ project(fcitx5-google-ime LANGUAGES CXX)
 find_package(Fcitx5Core REQUIRED)
 find_package(CURL REQUIRED)
 
-add_library(fcitx5-google-ime SHARED src/fcitx5_google_ime.cc)
+add_library(fcitx5-google-ime SHARED src/fcitx5_google_ime.cc src/engine.cc)
 
 target_compile_features(fcitx5-google-ime PRIVATE cxx_std_17)
 target_include_directories(fcitx5-google-ime PRIVATE src)
+
+# When Fcitx5Core is found, enable the HAVE_FCITX5 define so engine.cc compiles
+if(TARGET Fcitx5::Core)
+    target_compile_definitions(fcitx5-google-ime PRIVATE HAVE_FCITX5=1)
+endif()
 
 # Link imported targets directly
 target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core ${CURL_LIBRARIES})
