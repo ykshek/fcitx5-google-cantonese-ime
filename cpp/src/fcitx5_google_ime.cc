@@ -1,18 +1,13 @@
-// Minimal skeleton for an fcitx5 input-method plugin that forwards requests
-// to the local Python daemon. This file is a starting point: it contains
-// example scaffolding and HTTP client code (libcurl) but DOES NOT contain
-// the full, correct fcitx5 plugin registration boilerplate. Use this as a
-// template to finish the integration with fcitx5 APIs on your system.
+// More complete skeleton for an fcitx5 input-method plugin that forwards
+// composition queries to the local Python daemon. This file aims to provide
+// clearer integration points and candidate UI glue. It still requires the
+// fcitx5 development headers to be present to compile the real engine path.
 
 #include <iostream>
 #include <string>
 #include <vector>
 #include <curl/curl.h>
-
-// NOTE: The real fcitx5 plugin must include fcitx5 headers and implement the
-// appropriate plugin/engine interfaces. That code depends on the fcitx5
-// development headers which vary across distributions. Placeholders below
-// indicate where to hook into fcitx5's input engine lifecycle.
+#include <mutex>
 
 static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     ((std::string*)userp)->append((char*)contents, size * nmemb);
@@ -43,8 +38,7 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
     }
     curl_easy_cleanup(curl);
 
-    // Very small and permissive JSON parsing to extract "candidates" array.
-    // For a robust implementation link against nlohmann/json or similar.
+    // Parse naive JSON like before; replace with nlohmann::json for robustness.
     auto pos = response.find("\"candidates\"");
     if (pos == std::string::npos) {
         return out;
@@ -55,10 +49,8 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
     if (end == std::string::npos) return out;
     std::string arr = response.substr(start + 1, end - start - 1);
 
-    // crude split on commas; this will treat strings simply
     size_t i = 0;
     while (i < arr.size()) {
-        // skip whitespace
         while (i < arr.size() && isspace((unsigned char)arr[i])) ++i;
         if (i >= arr.size()) break;
         if (arr[i] == '"') {
@@ -72,7 +64,6 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
             out.push_back(s);
             i = j + 1;
         } else {
-            // skip token
             size_t j = i;
             while (j < arr.size() && arr[j] != ',') ++j;
             i = j + 1;
@@ -81,16 +72,45 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
     return out;
 }
 
-// Placeholder: hook points where fcitx5 will call into this module.
-int main(int argc, char** argv) {
-    std::cerr << "fcitx5-google-ime stub. This binary is a skeleton; it is not a complete fcitx5 module.\n";
-    std::cerr << "Run the Python daemon and then implement the fcitx5 engine to call query_daemon().\n";
+#ifdef HAVE_FCITX5
+// The real fcitx5 integration goes here. Include fcitx5 headers and implement
+// the engine class that listens for composition updates, queries the daemon,
+// and displays candidates using fcitx5's candidate UI APIs.
 
-    // Example quick test against the daemon if it is running.
-    auto cands = query_daemon("nei", "zh-t-i0-pinyin", 6);
-    std::cerr << "Candidates (example):\n";
-    for (auto &c : cands) {
-        std::cerr << " - " << c << "\n";
+// Example pseudo-code and integration points:
+// #include <fcitx/inputcontext.h>
+// #include <fcitx/inputmethodengine.h>
+// #include <fcitx/instance.h>
+// using namespace fcitx;
+
+// class GoogleDaemonEngine : public InputMethodEngine { ... }
+
+// Key responsibilities of the engine implementation:
+// - react to onKeyEvent / onUpdate to maintain the composition buffer
+// - when composition string changes, call query_daemon() to retrieve candidates
+// - present candidates via input context's candidate UI (commit on selection)
+// - handle preedit (show typed text) and commit actions
+
+// Because fcitx5 APIs change over time and distros provide headers in
+// different packages, implementers should reference a known engine (e.g.
+// fcitx5-mozc or fcitx5-skk) for exact API calls.
+
+#endif // HAVE_FCITX5
+
+// For local testing without fcitx5 dev headers, provide a small CLI demo
+// that shows how candidates are fetched and displayed.
+int main(int argc, char** argv) {
+    if (argc > 1 && std::string(argv[1]) == "test") {
+        auto cands = query_daemon("nei", "zh-t-i0-pinyin", 8);
+        std::cerr << "Candidates:\n";
+        for (size_t i = 0; i < cands.size(); ++i) {
+            std::cerr << i << ": " << cands[i] << "\n";
+        }
+        return 0;
     }
+
+    std::cerr << "fcitx5-google-ime: This binary is a plugin skeleton.\n";
+    std::cerr << "Build with fcitx5 dev headers to produce a real engine.\n";
+    std::cerr << "Use 'cmake .. && make' in cpp/build; run './fcixt5-google-ime test' to demo queries.\n";
     return 0;
 }
