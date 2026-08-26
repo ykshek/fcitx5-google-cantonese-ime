@@ -19,6 +19,11 @@ build:
     set -euo pipefail
 
     # Install using the development container with host system access
+    echo "removing:"
+    tree ./cpp/build
+    sleep 1
+    rm -rf -v ./cpp/build
+    sleep 1
     podman run --rm \
         --userns=keep-id \
         --volume "$(pwd):/work:Z" \
