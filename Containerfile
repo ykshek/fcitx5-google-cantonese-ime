@@ -12,13 +12,12 @@ RUN dnf5 -y update && \
         fcitx5-devel \
         fcitx5-qt-devel \
         extra-cmake-modules \
-        && \
-        dnf5 clean all
+    && dnf5 clean all
 
 
 # Set up workspace directory
-RUN mkdir -p /workspace
-WORKDIR /workspace
+RUN mkdir -p cpp/build
+WORKDIR /work
 
 # Set environment variables for development
 ENV CMAKE_BUILD_TYPE=Release
