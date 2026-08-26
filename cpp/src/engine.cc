@@ -2,6 +2,8 @@
 
 #include "engine.h"
 #include "daemon_client.h" // call query_daemon() from daemon_client.cc when needed
+#include <thread>
+#include <iostream>
 
 using namespace fcitx;
 
