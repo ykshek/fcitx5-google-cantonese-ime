@@ -5,7 +5,7 @@ project(fcitx5-google-ime LANGUAGES CXX)
 find_package(Fcitx5Core REQUIRED)
 find_package(CURL REQUIRED)
 
-add_library(fcitx5-google-ime SHARED src/fcitx5_google_ime.cc src/engine.cc)
+add_library(fcitx5-google-ime SHARED src/daemon_client.cc src/engine.cc)
 
 target_compile_features(fcitx5-google-ime PRIVATE cxx_std_17)
 target_include_directories(fcitx5-google-ime PRIVATE src)
