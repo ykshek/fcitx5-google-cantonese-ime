@@ -18,13 +18,6 @@ endif()
 # Link imported targets directly
 target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core ${CURL_LIBRARIES})
 
-# Ensure the Fcitx5Core include directories are available to the target.
-# Some CMake package configs export INTERFACE include directories via the
-# imported target; use generator expression to propagate them explicitly.
-if(TARGET Fcitx5::Core)
-    target_include_directories(fcitx5-google-ime PRIVATE $<TARGET_PROPERTY:Fcitx5::Core,INTERFACE_INCLUDE_DIRECTORIES>)
-endif()
-
 # Installation target
 install(TARGETS fcitx5-google-ime LIBRARY DESTINATION ${FCITX_INSTALL_PKGLIBDIR}/modules)
 
