@@ -28,7 +28,7 @@ public:
 
 class GoogleIMEFactory : public AddonFactory {
 public:
-    AddonInstance *create(Instance *instance) { return new GoogleIMEEngine(); }
+    AddonInstance *create(AddonManager *manager) override { (void)manager; return new GoogleIMEEngine(); }
 };
 
 #endif // HAVE_FCITX5
