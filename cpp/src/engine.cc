@@ -6,10 +6,28 @@
 using namespace fcitx;
 
 void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) {
-    // No-op prototype: accept the event but do not consume it. This keeps the
-    // engine concrete and loadable by fcitx5. Replace with full logic later.
+    // Minimal runtime diagnostics and prototype candidate fetch.
+    // Keep the method non-intrusive: log the call and query the local daemon
+    // for quick feedback. This is a synchronous prototype and will be
+    // replaced by an asynchronous implementation later.
     (void)entry;
     (void)keyEvent;
+
+    try {
+        std::cerr << "GoogleIMEEngine: keyEvent invoked\n";
+        // Query the local daemon with a short test string. In practice this
+        // should use the current composition buffer; we're using a short
+        // placeholder so the call is cheap and visible in logs for testing.
+        auto candidates = query_daemon("test", "zh-t-i0-pinyin", 5);
+        std::cerr << "GoogleIMEEngine: daemon returned " << candidates.size() << " candidates\n";
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "GoogleIMEEngine: unknown exception from daemon query\n";
+    }
 }
 
 // Register addon factory using the macro that takes a single identifier
