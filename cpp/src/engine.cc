@@ -4,10 +4,6 @@
 #include "daemon_client.h" // call query_daemon() from daemon_client.cc when needed
 #include <thread>
 #include <iostream>
-#include <memory>
-#include <fcitx/inputpanel.h>
-#include <fcitx/candidate.h>
-#include <fcitx/text.h>
 
 using namespace fcitx;
 
@@ -21,35 +17,24 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
 
     try {
         std::cerr << "GoogleIMEEngine: keyEvent invoked (scheduling async query)\n";
-        // Synchronously query the daemon and update the input panel UI.
-        // This is a prototype: it's simpler and ensures the candidate UI
-        // appears while we implement proper async/event-loop integration.
-        auto ic = keyEvent.inputContext();
-        if (!ic) {
-            std::cerr << "GoogleIMEEngine: no input context\n";
-        } else {
+        // Launch an async worker to query the daemon so we don't block input.
+        // This prototype uses a detached thread; later this should integrate
+        // the fcitx5 EventLoop or a managed worker to safely post results
+        // back to the main thread.
+        std::thread worker([](){
             try {
-                std::string probe = "test"; // TODO: use composition buffer
-                auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
-                std::cerr << "GoogleIMEEngine: sync daemon returned " << candidates.size() << " candidates\n";
-
-                auto candList = std::make_unique<fcitx::CandidateList>();
+                auto candidates = query_daemon("test", "zh-t-i0-pinyin", 8);
+                std::cerr << "GoogleIMEEngine(async): daemon returned " << candidates.size() << " candidates\n";
                 for (size_t i = 0; i < candidates.size(); ++i) {
-                    fcitx::Text t(candidates[i]);
-                    auto cw = std::make_unique<fcitx::CandidateWord>(t);
-                    candList->insert(static_cast<int>(i), std::move(cw));
+                    std::cerr << "  async cand[" << i << "]=" << candidates[i] << "\n";
                 }
-
-                auto &panel = ic->inputPanel();
-                panel.setClientPreedit(fcitx::Text(probe));
-                panel.setCandidateList(std::move(candList));
-                ic->updatePreedit();
             } catch (const std::exception &e) {
-                std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
+                std::cerr << "GoogleIMEEngine(async): exception: " << e.what() << "\n";
             } catch (...) {
-                std::cerr << "GoogleIMEEngine: unknown exception scheduling sync\n";
+                std::cerr << "GoogleIMEEngine(async): unknown exception\n";
             }
-        }
+        });
+        worker.detach();
     } catch (const std::exception &e) {
         std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
     } catch (...) {
