@@ -45,8 +45,8 @@ Podman / containerized build (Fedora)
 just setup-venv     # setup python venv and install deps for daemon
 just run-daemon     # run the daemon
 just build-local    # build the C++ skeleton locally
-just podman-build-container # build the container
-just podman-build   # build the C++ project inside the Fedora container
+just build-container # build the container
+just build   # build the C++ project inside the Fedora container
 ```
 
 ## Notes

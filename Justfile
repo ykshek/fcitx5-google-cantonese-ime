@@ -1,21 +1,36 @@
 # Justfile with convenient tasks to run the daemon, build locally, and build in podman container
+image_name := "localhost/fcitx5-google-ime:dev"
 
 setup-venv:
-	python3 -m venv .venv && . .venv/bin/activate && pip install -r daemon/requirements.txt
+    python3 -m venv .venv && . .venv/bin/activate && pip install -r daemon/requirements.txt
 
 run-daemon:
-	. .venv/bin/activate && python daemon/server.py
+    . .venv/bin/activate && python daemon/server.py
 
 build-local:
-	mkdir -p cpp/build && cd cpp/build && cmake .. && make -j$(nproc)
+    mkdir -p cpp/build && cd cpp/build && cmake .. && make -j$(nproc)
+build-container:
+    #!/usr/bin/env bash
+    echo "Building development container image..."
+    podman build -t {{image_name}} -f Containerfile .
 
-podman-build-container:
-	podman build -t fcitx5-google-ime-build -f Containerfile .
+build:
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-podman-build:
-	# Build the project inside the container and drop artifacts into the host workspace
-	podman run --rm -v "$(pwd)":/work:Z -w /work fcitx5-google-ime-build /bin/bash -c "mkdir -p cpp/build && cd cpp/build && cmake .. && make -j$(nproc)"
+    # Install using the development container with host system access
+    podman run --rm \
+        --userns=keep-id \
+        --volume "$(pwd):/work:Z" \
+        --workdir /work \
+        {{image_name}} \
+        bash -c '
+            mkdir -p cpp/build
+            cd cpp/build
+            cmake ..
+            make -j$(nproc)
+        '
 
 # Quick test against the daemon (requires the daemon to be running)
 curl-suggest q:
-	@echo curl "http://127.0.0.1:8765/suggest?q={{q}}&itc=zh-t-i0-pinyin&num=8"
+    @echo curl "http://127.0.0.1:8765/suggest?q={{q}}&itc=zh-t-i0-pinyin&num=8"
