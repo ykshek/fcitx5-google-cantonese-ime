@@ -5,9 +5,23 @@
 #include <thread>
 #include <iostream>
 #include <memory>
-#include <fcitx/inputpanel.h>
-#include <fcitx/candidate.h>
-#include <fcitx/text.h>
+
+// Some systems may not have the full fcitx5 development headers installed
+// even when the runtime libraries are present. Use __has_include to detect
+// availability of the UI headers and fall back to a no-UI prototype when
+// they are missing so the project remains buildable on minimal systems.
+#if defined(__has_include)
+#  if __has_include(<fcitx/inputpanel.h>) && __has_include(<fcitx/candidate.h>) && __has_include(<fcitx/text.h>)
+#    include <fcitx/inputpanel.h>
+#    include <fcitx/candidate.h>
+#    include <fcitx/text.h>
+#    define HAVE_FCITX5_UI 1
+#  else
+#    define HAVE_FCITX5_UI 0
+#  endif
+#else
+#  define HAVE_FCITX5_UI 0
+#endif
 
 using namespace fcitx;
 
