@@ -1,7 +1,7 @@
 #ifdef HAVE_FCITX5
 
 #include "engine.h"
-#include "fcitx5_google_ime.cc" // reuse query_daemon function (optional)
+#include "daemon_client.h" // call query_daemon() from daemon_client.cc when needed
 
 using namespace fcitx;
 
