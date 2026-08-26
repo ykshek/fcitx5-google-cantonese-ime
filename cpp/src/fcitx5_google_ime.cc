@@ -20,9 +20,15 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
     if (!curl) {
         return out;
     }
-    std::string url = "http://127.0.0.1:8765/suggest?q=" + curl_easy_escape(curl, text.c_str(), 0)
-                      + "&itc=" + curl_easy_escape(curl, itc.c_str(), 0)
+    // curl_easy_escape returns a newly allocated char* that must be freed with curl_free.
+    char* esc_text = curl_easy_escape(curl, text.c_str(), 0);
+    char* esc_itc = curl_easy_escape(curl, itc.c_str(), 0);
+    std::string url = std::string("http://127.0.0.1:8765/suggest?q=") + (esc_text ? esc_text : "")
+                      + "&itc=" + (esc_itc ? esc_itc : "")
                       + "&num=" + std::to_string(num);
+
+    if (esc_text) curl_free(esc_text);
+    if (esc_itc) curl_free(esc_itc);
 
     std::string response;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
