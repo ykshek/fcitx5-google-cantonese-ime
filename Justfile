@@ -14,7 +14,7 @@ podman-build-container:
 
 podman-build:
 	# Build the project inside the container and drop artifacts into the host workspace
-	podman run --rm -v "$(pwd)":/work -w /work fcitx5-google-ime-build /bin/bash -c "mkdir -p cpp/build && cd cpp/build && cmake .. && make -j$(nproc)"
+	podman run --rm -v "$(pwd)":/work:Z -w /work fcitx5-google-ime-build /bin/bash -c "mkdir -p cpp/build && cd cpp/build && cmake .. && make -j$(nproc)"
 
 # Quick test against the daemon (requires the daemon to be running)
 curl-suggest q:
