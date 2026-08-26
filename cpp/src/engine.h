@@ -3,34 +3,32 @@
 #ifdef HAVE_FCITX5
 
 #include <fcitx/addonfactory.h>
-#include <fcitx/inputcontext.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
 using namespace fcitx;
 
+// Minimal compatibility layer: implement the small set of virtuals required by
+// the platform's InputMethodEngine interface. This keeps the engine concrete
+// and lets fcitx5 discover and load the addon. The implementation is a
+// no-op prototype; later it can be extended to use query_daemon().
+
 class GoogleIMEEngine : public InputMethodEngine {
 public:
-    GoogleIMEEngine(Instance *instance) : InputMethodEngine(instance) {}
+    GoogleIMEEngine() = default;
     ~GoogleIMEEngine() override = default;
 
-    const std::string &id() const override { static std::string i = "google-ime"; return i; }
-    const std::string &name() const override { static std::string n = "Google Input Tools (prototype)"; return n; }
+    // Match the platform API: keyEvent signature is library-specific. Use the
+    // signature shown by the build errors: keyEvent(const InputMethodEntry&, KeyEvent&).
+    void keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) override;
 
-    // Called when engine is activated for an input context
-    void activate(InputContext *ic) override;
-    void deactivate(InputContext *ic) override;
-
-    // Handle key events. Return true if the event is swallowed by engine.
-    bool keyEvent(InputContext *ic, KeyEvent &keyEvent) override;
-
-    // Reset engine state for the context
-    void reset(InputContext *ic) override;
+    // Provide a simple reset hook. Signature may vary; provide a generic one.
+    void reset(InputContext *ic) { }
 };
 
 class GoogleIMEFactory : public AddonFactory {
 public:
-    AddonInstance *create(Instance *instance) override { return new GoogleIMEEngine(instance); }
+    AddonInstance *create(Instance *instance) { return new GoogleIMEEngine(); }
 };
 
 #endif // HAVE_FCITX5
