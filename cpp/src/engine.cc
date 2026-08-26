@@ -14,19 +14,29 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
     (void)keyEvent;
 
     try {
-        std::cerr << "GoogleIMEEngine: keyEvent invoked\n";
-        // Query the local daemon with a short test string. In practice this
-        // should use the current composition buffer; we're using a short
-        // placeholder so the call is cheap and visible in logs for testing.
-        auto candidates = query_daemon("test", "zh-t-i0-pinyin", 5);
-        std::cerr << "GoogleIMEEngine: daemon returned " << candidates.size() << " candidates\n";
-        for (size_t i = 0; i < candidates.size(); ++i) {
-            std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
-        }
+        std::cerr << "GoogleIMEEngine: keyEvent invoked (scheduling async query)\n";
+        // Launch an async worker to query the daemon so we don't block input.
+        // This prototype uses a detached thread; later this should integrate
+        // the fcitx5 EventLoop or a managed worker to safely post results
+        // back to the main thread.
+        std::thread worker([](){
+            try {
+                auto candidates = query_daemon("test", "zh-t-i0-pinyin", 8);
+                std::cerr << "GoogleIMEEngine(async): daemon returned " << candidates.size() << " candidates\n";
+                for (size_t i = 0; i < candidates.size(); ++i) {
+                    std::cerr << "  async cand[" << i << "]=" << candidates[i] << "\n";
+                }
+            } catch (const std::exception &e) {
+                std::cerr << "GoogleIMEEngine(async): exception: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "GoogleIMEEngine(async): unknown exception\n";
+            }
+        });
+        worker.detach();
     } catch (const std::exception &e) {
         std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
     } catch (...) {
-        std::cerr << "GoogleIMEEngine: unknown exception from daemon query\n";
+        std::cerr << "GoogleIMEEngine: unknown exception scheduling async\n";
     }
 }
 
