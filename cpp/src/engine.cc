@@ -95,19 +95,29 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     }
 
                     auto &panel = ic->inputPanel();
-                    std::cerr << "GoogleIMEEngine: setting client preedit/ candidate list\n";
-                    panel.setClientPreedit(fcitx::Text(probe));
+                    std::cerr << "GoogleIMEEngine: setting candidate list\n";
                     panel.setCandidateList(std::move(tmp));
                     auto cl = panel.candidateList();
-                    std::cerr << "GoogleIMEEngine: panel.candidateList()=" << (cl ? "present" : "null") << "\n";
+                    std::cerr << "GoogleIMEEngine: panel.empty()=" << (panel.empty() ? "true" : "false") << ", candidateList=" << (cl ? "present" : "null");
+                    if (cl) {
+                        if (auto common = dynamic_cast<fcitx::CommonCandidateList*>(cl.get())) {
+                            std::cerr << "GoogleIMEEngine: candidateList.size()=" << common->size() << "\n";
+                        }
+                    }
+
+                    // Use client capability to decide clientPreedit vs preedit like cantonese engine
+                    if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+                        panel.setClientPreedit(fcitx::Text(probe));
+                    } else {
+                        panel.setPreedit(fcitx::Text(probe));
+                    }
+
+                    std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
+                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                     std::cerr << "GoogleIMEEngine: updatePreedit()\n";
                     ICOUT() << "GoogleIMEEngine: ic->hasFocus()=" << (ic->hasFocus() ? "true" : "false") << ", isPreeditEnabled=" << (ic->isPreeditEnabled() ? "true" : "false");
                     ic->updatePreedit();
-                    std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
-                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-                    // Extra attempt: call updateUserInterface again to force refresh
-                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-#else
+#endif
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
