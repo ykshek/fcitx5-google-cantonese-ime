@@ -6,6 +6,8 @@
 #include <iostream>
 #include <memory>
 #include <fcitx/candidatelist.h>
+#include <fcitx/event.h>
+#include <fcitx/addonmanager.h>
 
 // Probe for common fcitx5 UI header locations and include what exists.
 // This keeps the code portable across distros and header layout variations.
@@ -110,6 +112,11 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
     } catch (...) {
         std::cerr << "GoogleIMEEngine: unknown exception scheduling worker\n";
     }
+}
+
+// Implement factory create now that AddonManager is a complete type here.
+AddonInstance *GoogleIMEFactory::create(AddonManager *manager) {
+    return new GoogleIMEEngine(manager ? manager->instance() : nullptr);
 }
 
 // Register addon factory using the macro that takes a single identifier

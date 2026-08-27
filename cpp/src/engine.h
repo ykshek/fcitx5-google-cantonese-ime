@@ -38,7 +38,7 @@ private:
 
 class GoogleIMEFactory : public AddonFactory {
 public:
-    AddonInstance *create(AddonManager *manager) override { return new GoogleIMEEngine(manager ? manager->instance() : nullptr); }
+    AddonInstance *create(AddonManager *manager) override;
 };
 
 #endif // HAVE_FCITX5
