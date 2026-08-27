@@ -95,29 +95,33 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     }
 
                     auto &panel = ic->inputPanel();
+                    std::cerr << "GoogleIMEEngine: reset panel and set preedit\n";
+                    panel.reset();
+                    std::cerr << "GoogleIMEEngine: capabilityFlags=" << ic->capabilityFlags().to_ulong() << "\n";
+                    // Set preedit first (match zhuyin/pinyin engines)
+                    if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+                        panel.setClientPreedit(fcitx::Text(probe));
+                        std::cerr << "GoogleIMEEngine: called setClientPreedit and updatePreedit()\n";
+                        ic->updatePreedit();
+                    } else {
+                        panel.setPreedit(fcitx::Text(probe));
+                        std::cerr << "GoogleIMEEngine: called setPreedit\n";
+                    }
+
+                    // Then set candidate list and finally update the UI
                     std::cerr << "GoogleIMEEngine: setting candidate list\n";
                     panel.setCandidateList(std::move(tmp));
                     auto cl = panel.candidateList();
-                    std::cerr << "GoogleIMEEngine: panel.empty()=" << (panel.empty() ? "true" : "false") << ", candidateList=" << (cl ? "present" : "null");
+                    std::cerr << "GoogleIMEEngine: panel.empty()=" << (panel.empty() ? "true" : "false") << ", candidateList=" << (cl ? "present" : "null") << "\n";
                     if (cl) {
                         if (auto common = dynamic_cast<fcitx::CommonCandidateList*>(cl.get())) {
                             std::cerr << "GoogleIMEEngine: candidateList.size()=" << common->size() << "\n";
                         }
                     }
 
-                    // Use client capability to decide clientPreedit vs preedit like cantonese engine
-                    if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
-                        panel.setClientPreedit(fcitx::Text(probe));
-                    } else {
-                        panel.setPreedit(fcitx::Text(probe));
-                    }
-
                     std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
                     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-                    std::cerr << "GoogleIMEEngine: updatePreedit()\n";
-                    ICOUT() << "GoogleIMEEngine: ic->hasFocus()=" << (ic->hasFocus() ? "true" : "false") << ", isPreeditEnabled=" << (ic->isPreeditEnabled() ? "true" : "false");
-                    ic->updatePreedit();
-#else
+#endif
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
