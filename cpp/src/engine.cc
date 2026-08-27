@@ -68,7 +68,41 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
         } catch (...) {
             sym = 0;
         }
-
+        // Check if there is an active candidate list
+        #if HAVE_FCITX5_UI
+        auto cl = ic->inputPanel().candidateList();
+        if (cl && cl->size() > 0) {
+            // Space key commits the first candidate (index 0)
+            if (sym == 32) {
+                auto candidate = cl->candidate(0);
+                if (candidate) {
+                    ic->commitString(candidate->text().toString());
+                }
+                buffer_.clear();
+                ic->inputPanel().reset();
+                ic->updatePreedit();
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                keyEvent.filterAndAccept();
+                return;
+            }
+            // Keys 1 to 9 commit the corresponding candidate
+            else if (sym >= 49 && sym <= 57) {
+                int index = sym - 49;
+                if (index < cl->size()) {
+                    auto candidate = cl->candidate(index);
+                    if (candidate) {
+                        ic->commitString(candidate->text().toString());
+                    }
+                    buffer_.clear();
+                    ic->inputPanel().reset();
+                    ic->updatePreedit();
+                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                }
+                keyEvent.filterAndAccept();
+                return;
+            }
+        }
+        #endif
         if (sym >= 32 && sym <= 126) {
             buffer_.push_back(static_cast<char>(sym));
             // consume the key so the client doesn't receive the character
@@ -160,7 +194,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         fcitx::Text t(candidates[i]);
                         std::cerr << "  candidate[" << i << "]=" << t.toString() << "\n";
-                        auto cw = std::make_unique<fcitx::CandidateWord>(t);
+                        auto cw = std::make_unique<fcitx::SimpleCandidateWord>(t);
                         tmp->insert(static_cast<int>(i), std::move(cw));
                     }
 
@@ -262,10 +296,11 @@ void GoogleIMEEngine::removePendingEvent(fcitx::EventSource *src) {
 }
 
 // Reset engine state when the input context is cleared.
-void GoogleIMEEngine::reset(InputContext *ic) {
+void GoogleIMEEngine::reset(const InputMethodEntry &entry, InputContextEvent &event) {
     std::lock_guard<std::mutex> lk(pendingEventMutex_);
     pendingEvents_.clear();
     buffer_.clear();
+    auto ic = event.inputContext();
     if (ic) {
 #if HAVE_FCITX5_UI
         ic->inputPanel().reset();
