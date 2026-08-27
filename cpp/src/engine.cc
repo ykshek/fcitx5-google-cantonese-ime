@@ -47,15 +47,45 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
     // post UI update to the main EventLoop so UI changes happen on the
     // main thread.
     try {
-        std::cerr << "GoogleIMEEngine: keyEvent invoked (async)\n";
+        std::cerr << "GoogleIMEEngine: keyEvent invoked\n";
         auto ic = keyEvent.inputContext();
         if (!ic) {
             std::cerr << "GoogleIMEEngine: no input context\n";
             return;
         }
 
-        // TODO: derive probe from actual composition buffer
-        std::string probe = "test";
+        // Ignore key releases
+        if (keyEvent.isRelease()) {
+            return;
+        }
+
+        // If KeyEvent provides a text() helper, treat printable text input as
+        // characters to append to the composition buffer. Many frontends send
+        // printable characters in the text() field.
+        std::string t;
+        try {
+            t = keyEvent.text();
+        } catch (...) {
+            // If text() isn't available on this build, fall back to empty
+            t = "";
+        }
+
+        if (!t.empty()) {
+            buffer_ += t;
+            // consume the key so the client doesn't receive the character
+            try {
+                keyEvent.filterAndAccept();
+            } catch (...) {
+                // best-effort: if API not present, ignore
+            }
+        } else {
+            // If no printable text, ignore other keys for now (Leave them to
+            // the client). Later add handling for Backspace/Enter/Arrow.
+            return;
+        }
+
+        // Use the current composition buffer as probe
+        std::string probe = buffer_;
 
         uint64_t mySeq = ++querySeq;
 
@@ -82,6 +112,16 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                         std::cerr << "GoogleIMEEngine: stale result, drop\n";
                         // clear this EventSource from pendingEvents_ on main thread
                         std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                        removePendingEvent(src);
+                        return false;
+                    }
+
+                    // If composition buffer has been cleared meanwhile, hide panel
+                    if (buffer_.empty()) {
+                        std::cerr << "GoogleIMEEngine: buffer cleared before result, hiding panel\n";
+                        ic->inputPanel().reset();
+                        ic->updatePreedit();
+                        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                         removePendingEvent(src);
                         return false;
                     }
@@ -140,6 +180,15 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                         panel.setCandidateList(std::move(testList));
                         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                     }
+
+                    // When a result arrives, ensure the current buffer still matches the
+                    // probe used for the query. If the user continued typing and buffer
+                    // differs, don't overwrite the newer composition with stale UI.
+                    if (buffer_ != probe) {
+                        std::cerr << "GoogleIMEEngine: buffer changed (current='" << buffer_ << "', probe='" << probe << "'), ignoring result\n";
+                        removePendingEvent(src);
+                        return false;
+                    }
 #endif
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
@@ -180,6 +229,18 @@ void GoogleIMEEngine::removePendingEvent(fcitx::EventSource *src) {
             pendingEvents_.erase(it);
             return;
         }
+    }
+}
+
+// Reset engine state when the input context is cleared.
+void GoogleIMEEngine::reset(InputContext *ic) {
+    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+    pendingEvents_.clear();
+    buffer_.clear();
+    if (ic) {
+        ic->inputPanel().reset();
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 }
 
