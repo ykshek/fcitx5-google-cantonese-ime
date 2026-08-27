@@ -3,12 +3,13 @@ project(fcitx5-google-ime LANGUAGES CXX)
 
 # Find native Fcitx5 CMake configuration
 find_package(Fcitx5Core REQUIRED)
+include("${FCITX_INSTALL_CMAKECONFIG_DIR}/Fcitx5Utils/Fcitx5CompilerSettings.cmake")
 find_package(CURL REQUIRED)
 
 add_library(fcitx5-google-ime SHARED src/daemon_client.cc src/engine.cc)
 
 target_compile_features(fcitx5-google-ime PRIVATE cxx_std_17)
-target_include_directories(fcitx5-google-ime PRIVATE src)
+target_include_directories(fcitx5-google-ime PRIVATE src ${Fcitx5Core_INCLUDE_DIRS} ${FCITX_INSTALL_INCLUDEDIR}/fcitx5)
 
 # When Fcitx5Core is found, enable the HAVE_FCITX5 define so engine.cc compiles
 if(TARGET Fcitx5::Core)
@@ -16,7 +17,7 @@ if(TARGET Fcitx5::Core)
 endif()
 
 # Link imported targets directly
-target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core ${CURL_LIBRARIES})
+target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core Fcitx5::Utils ${CURL_LIBRARIES})
 
 # Installation target
 install(TARGETS fcitx5-google-ime LIBRARY DESTINATION ${FCITX_INSTALL_PKGLIBDIR}/modules)

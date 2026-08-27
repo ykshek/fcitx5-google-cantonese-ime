@@ -5,6 +5,7 @@
 #include <thread>
 #include <iostream>
 #include <memory>
+#include <fcitx/candidatelist.h>
 
 // Probe for common fcitx5 UI header locations and include what exists.
 // This keeps the code portable across distros and header layout variations.
