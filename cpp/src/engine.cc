@@ -98,10 +98,14 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     std::cerr << "GoogleIMEEngine: setting client preedit/ candidate list\n";
                     panel.setClientPreedit(fcitx::Text(probe));
                     panel.setCandidateList(std::move(tmp));
+                    auto cl = panel.candidateList();
+                    std::cerr << "GoogleIMEEngine: panel.candidateList()=" << (cl ? "present" : "null") << "\n";
                     std::cerr << "GoogleIMEEngine: updatePreedit()\n";
                     ICOUT() << "GoogleIMEEngine: ic->hasFocus()=" << (ic->hasFocus() ? "true" : "false") << ", isPreeditEnabled=" << (ic->isPreeditEnabled() ? "true" : "false");
                     ic->updatePreedit();
                     std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
+                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                    // Extra attempt: call updateUserInterface again to force refresh
                     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 #else
                     for (size_t i = 0; i < candidates.size(); ++i) {
