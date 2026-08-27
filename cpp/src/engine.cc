@@ -113,7 +113,9 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     // If composition buffer has been cleared meanwhile, hide panel
                     if (buffer_.empty()) {
                         std::cerr << "GoogleIMEEngine: buffer cleared before result, hiding panel\n";
+#if HAVE_FCITX5_UI
                         ic->inputPanel().reset();
+#endif
                         ic->updatePreedit();
                         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                         removePendingEvent(src);
@@ -232,7 +234,9 @@ void GoogleIMEEngine::reset(InputContext *ic) {
     pendingEvents_.clear();
     buffer_.clear();
     if (ic) {
+#if HAVE_FCITX5_UI
         ic->inputPanel().reset();
+#endif
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
