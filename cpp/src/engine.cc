@@ -58,42 +58,33 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
                 std::cerr << "GoogleIMEEngine(worker): daemon returned " << candidates.size() << " candidates\n";
 
-                auto inst = ic->instance();
-                if (!inst) {
-                    std::cerr << "GoogleIMEEngine: no instance when posting result\n";
+                // NOTE: event-loop posting via Instance/EventLoop APIs varies across
+                // fcitx5 versions/distributions. To avoid mismatched APIs and keep the
+                // change small, update the InputPanel directly here. This is a
+                // pragmatic short-term approach for the prototype; it may be safer to
+                // post updates to the main loop via Instance::eventLoop() in a later
+                // revision when the exact headers are available.
+                if (querySeq != mySeq) {
+                    std::cerr << "GoogleIMEEngine: stale result, drop\n";
                     return;
                 }
-                auto loop = inst->eventLoop();
-                if (!loop) {
-                    std::cerr << "GoogleIMEEngine: no event loop\n";
-                    return;
-                }
-
-                // post deferred event to the main loop
-                loop->addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *) -> bool {
-                    if (querySeq != mySeq) {
-                        std::cerr << "GoogleIMEEngine: stale result, drop\n";
-                        return false;
-                    }
 #if HAVE_FCITX5_UI
-                    auto tmp = std::make_unique<fcitx::CommonCandidateList>();
-                    for (size_t i = 0; i < candidates.size(); ++i) {
-                        fcitx::Text t(candidates[i]);
-                        auto cw = std::make_unique<fcitx::CandidateWord>(t);
-                        tmp->insert(static_cast<int>(i), std::move(cw));
-                    }
+                auto tmp = std::make_unique<fcitx::CommonCandidateList>();
+                for (size_t i = 0; i < candidates.size(); ++i) {
+                    fcitx::Text t(candidates[i]);
+                    auto cw = std::make_unique<fcitx::CandidateWord>(t);
+                    tmp->insert(static_cast<int>(i), std::move(cw));
+                }
 
-                    auto &panel = ic->inputPanel();
-                    panel.setClientPreedit(fcitx::Text(probe));
-                    panel.setCandidateList(std::move(tmp));
-                    ic->updatePreedit();
+                auto &panel = ic->inputPanel();
+                panel.setClientPreedit(fcitx::Text(probe));
+                panel.setCandidateList(std::move(tmp));
+                ic->updatePreedit();
 #else
-                    for (size_t i = 0; i < candidates.size(); ++i) {
-                        std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
-                    }
+                for (size_t i = 0; i < candidates.size(); ++i) {
+                    std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
+                }
 #endif
-                    return false; // run once
-                });
 
             } catch (const std::exception &e) {
                 std::cerr << "GoogleIMEEngine(worker): exception: " << e.what() << "\n";

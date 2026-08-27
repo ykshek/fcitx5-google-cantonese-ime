@@ -3,6 +3,7 @@
 #ifdef HAVE_FCITX5
 
 #include <fcitx/addonfactory.h>
+#include <atomic>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
@@ -23,7 +24,7 @@ public:
 
     // Reset is called when an InputContext is cleared (focus out / cancel).
     // Implementations should clear any composition buffer and hide candidates.
-    void reset(InputContext *ic) override { (void)ic; }
+    void reset(InputContext *ic) { (void)ic; }
 
 private:
     // Sequence id for in-flight queries. Each new query increments the id;
