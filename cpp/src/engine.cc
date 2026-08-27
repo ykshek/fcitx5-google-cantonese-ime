@@ -117,7 +117,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     std::cerr << "GoogleIMEEngine: updatePreedit()\n";
                     ICOUT() << "GoogleIMEEngine: ic->hasFocus()=" << (ic->hasFocus() ? "true" : "false") << ", isPreeditEnabled=" << (ic->isPreeditEnabled() ? "true" : "false");
                     ic->updatePreedit();
-#endif
+#else
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
