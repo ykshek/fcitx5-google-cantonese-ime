@@ -58,9 +58,11 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
                 std::cerr << "GoogleIMEEngine(worker): daemon returned " << candidates.size() << " candidates\n";
 
-                auto inst = ic->instance();
+                // Use the Instance pointer injected by factory. Fallback to
+                // InputContext-derived instance only if needed.
+                auto inst = instance_;
                 if (!inst) {
-                    std::cerr << "GoogleIMEEngine: no instance when posting result\n";
+                    std::cerr << "GoogleIMEEngine: no instance available to post result\n";
                     return;
                 }
                 auto loop = inst->eventLoop();
