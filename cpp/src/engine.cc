@@ -8,6 +8,8 @@
 #include <fcitx/candidatelist.h>
 #include <fcitx/event.h>
 #include <fcitx/addonmanager.h>
+#include <fcitx-utils/event.h>
+#include <fcitx-utils/eventloopinterface.h>
 
 // Probe for common fcitx5 UI header locations and include what exists.
 // This keeps the code portable across distros and header layout variations.
