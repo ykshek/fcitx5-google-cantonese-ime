@@ -59,28 +59,22 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
             return;
         }
 
-        // If KeyEvent provides a text() helper, treat printable text input as
-        // characters to append to the composition buffer. Many frontends send
-        // printable characters in the text() field.
-        std::string t;
+        // Try to obtain a printable keysym from the low-level Key object.
+        // Many fcitx frontends populate keyEvent.key().sym() with an ASCII
+        // code for printable keys.
+        int sym = 0;
         try {
-            t = keyEvent.text();
+            sym = keyEvent.key().sym();
         } catch (...) {
-            // If text() isn't available on this build, fall back to empty
-            t = "";
+            sym = 0;
         }
 
-        if (!t.empty()) {
-            buffer_ += t;
+        if (sym >= 32 && sym <= 126) {
+            buffer_.push_back(static_cast<char>(sym));
             // consume the key so the client doesn't receive the character
-            try {
-                keyEvent.filterAndAccept();
-            } catch (...) {
-                // best-effort: if API not present, ignore
-            }
+            try { keyEvent.filterAndAccept(); } catch (...) {}
         } else {
-            // If no printable text, ignore other keys for now (Leave them to
-            // the client). Later add handling for Backspace/Enter/Arrow.
+            // TODO: handle Backspace / Enter / Arrow keys by inspecting sym
             return;
         }
 

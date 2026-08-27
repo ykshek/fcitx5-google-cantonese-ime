@@ -30,7 +30,7 @@ public:
 
     // Reset is called when an InputContext is cleared (focus out / cancel).
     // Implementations should clear any composition buffer and hide candidates.
-    void reset(InputContext *ic) override;
+    void reset(InputContext *ic);
 
 private:
     // Sequence id for in-flight queries. Each new query increments the id;
