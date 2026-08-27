@@ -54,16 +54,18 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
 
 #if HAVE_FCITX5_UI
         // Build fcitx5 CandidateList and show in input panel.
-        auto candList = std::make_unique<fcitx::CandidateList>();
+        // Use CommonCandidateList (a helper that implements paging and layout)
+        auto tmp = std::make_unique<fcitx::CommonCandidateList>();
         for (size_t i = 0; i < candidates.size(); ++i) {
             fcitx::Text t(candidates[i]);
             auto cw = std::make_unique<fcitx::CandidateWord>(t);
-            candList->insert(static_cast<int>(i), std::move(cw));
+            tmp->insert(static_cast<int>(i), std::move(cw));
         }
 
         auto &panel = ic->inputPanel();
         panel.setClientPreedit(fcitx::Text(probe));
-        panel.setCandidateList(std::move(candList));
+        // CommonCandidateList derives from CandidateList; move-convert unique_ptr.
+        panel.setCandidateList(std::move(tmp));
         ic->updatePreedit();
 #else
         // UI headers missing: just log the candidate set for debugging.
