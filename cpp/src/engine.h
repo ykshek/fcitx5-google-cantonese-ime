@@ -41,9 +41,17 @@ private:
     // without relying on InputContext API variability.
     Instance *instance_{nullptr};
 
-    // Keep pending EventSource alive until the deferred callback has run.
-    std::unique_ptr<fcitx::EventSource> pendingEvent_;
+    // Composition buffer tracking typed text
+    std::string buffer_;
+
+    // Keep pending EventSource objects alive until their deferred callbacks run.
+    // Use a container so multiple in-flight events do not cancel each other by
+    // overwriting a single unique_ptr instance.
+    std::vector<std::unique_ptr<fcitx::EventSource>> pendingEvents_;
     std::mutex pendingEventMutex_;
+
+    // Helper: remove an EventSource* from pendingEvents_ (called on main thread)
+    void removePendingEvent(fcitx::EventSource *src);
 };
 
 class GoogleIMEFactory : public AddonFactory {

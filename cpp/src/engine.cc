@@ -80,9 +80,9 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     std::cerr << "GoogleIMEEngine(deferred): callback running (mySeq=" << mySeq << ", querySeq=" << querySeq << ")\n";
                     if (querySeq != mySeq) {
                         std::cerr << "GoogleIMEEngine: stale result, drop\n";
-                        // clear pendingEvent_ on main thread
+                        // clear this EventSource from pendingEvents_ on main thread
                         std::lock_guard<std::mutex> lk(pendingEventMutex_);
-                        pendingEvent_.reset();
+                        removePendingEvent(src);
                         return false;
                     }
 #if HAVE_FCITX5_UI
@@ -144,16 +144,16 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
-                    // clear pendingEvent_ on main thread
+                    // clear this EventSource from pendingEvents_ on main thread
                     std::lock_guard<std::mutex> lk(pendingEventMutex_);
-                    pendingEvent_.reset();
+                    removePendingEvent(src);
                     return false; // run once
                 });
 
                 if (ev) {
                     std::lock_guard<std::mutex> lk(pendingEventMutex_);
-                    pendingEvent_ = std::move(ev);
-                    std::cerr << "GoogleIMEEngine: deferred event scheduled and stored\n";
+                    pendingEvents_.push_back(std::move(ev));
+                    std::cerr << "GoogleIMEEngine: deferred event scheduled and stored (pendingEvents=" << pendingEvents_.size() << ")\n";
                 } else {
                     std::cerr << "GoogleIMEEngine: addDeferEvent returned null\n";
                 }
@@ -170,6 +170,16 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
         std::cerr << "GoogleIMEEngine: exception scheduling worker: " << e.what() << "\n";
     } catch (...) {
         std::cerr << "GoogleIMEEngine: unknown exception scheduling worker\n";
+    }
+}
+
+// Helper: removes an EventSource pointer from pendingEvents_.
+void GoogleIMEEngine::removePendingEvent(fcitx::EventSource *src) {
+    for (auto it = pendingEvents_.begin(); it != pendingEvents_.end(); ++it) {
+        if (it->get() == src) {
+            pendingEvents_.erase(it);
+            return;
+        }
     }
 }
 
