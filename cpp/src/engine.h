@@ -16,7 +16,7 @@ using namespace fcitx;
 
 class GoogleIMEEngine : public InputMethodEngine {
 public:
-    GoogleIMEEngine() = default;
+    explicit GoogleIMEEngine(Instance *instance = nullptr) : instance_(instance) {}
     ~GoogleIMEEngine() override = default;
 
     // Match the platform API: keyEvent signature is library-specific.
@@ -31,11 +31,14 @@ private:
     // deferred result handlers check it to decide whether their result is
     // stale and should be discarded.
     std::atomic<uint64_t> querySeq{0};
+    // Instance pointer injected by factory so addon can post to the main loop
+    // without relying on InputContext API variability.
+    Instance *instance_{nullptr};
 };
 
 class GoogleIMEFactory : public AddonFactory {
 public:
-    AddonInstance *create(AddonManager *manager) override { (void)manager; return new GoogleIMEEngine(); }
+    AddonInstance *create(AddonManager *manager) override { return new GoogleIMEEngine(manager ? manager->instance() : nullptr); }
 };
 
 #endif // HAVE_FCITX5
