@@ -73,10 +73,43 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
             buffer_.push_back(static_cast<char>(sym));
             // consume the key so the client doesn't receive the character
             try { keyEvent.filterAndAccept(); } catch (...) {}
+        } else if (sym == 8 || sym == 127) {
+            // Backspace: remove last char if present and update UI
+            if (!buffer_.empty()) buffer_.pop_back();
+            try { keyEvent.filterAndAccept(); } catch (...) {}
+        } else if (sym == 13 || sym == 10) {
+            // Enter: commit current buffer
+            if (!buffer_.empty()) {
+                try { ic->commitString(buffer_); } catch (...) {}
+                buffer_.clear();
+                // hide panel
+#if HAVE_FCITX5_UI
+                ic->inputPanel().reset();
+#endif
+                try { ic->updatePreedit(); } catch (...) {}
+                try { ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel); } catch (...) {}
+                try { keyEvent.filterAndAccept(); } catch (...) {}
+            }
+            return;
         } else {
-            // TODO: handle Backspace / Enter / Arrow keys by inspecting sym
+            // ignore other keys, let client handle them
             return;
         }
+
+        // Update preedit immediately so user sees typed text while async query runs
+#if HAVE_FCITX5_UI
+        try {
+            auto &panel = ic->inputPanel();
+            panel.reset();
+            if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+                panel.setClientPreedit(fcitx::Text(buffer_));
+                ic->updatePreedit();
+            } else {
+                panel.setPreedit(fcitx::Text(buffer_));
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+            }
+        } catch (...) {}
+#endif
 
         // Use the current composition buffer as probe
         std::string probe = buffer_;
