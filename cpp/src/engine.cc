@@ -140,7 +140,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                         panel.setCandidateList(std::move(testList));
                         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                     }
-
+#endif
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
