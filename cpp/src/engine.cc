@@ -189,13 +189,17 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
         // Update preedit immediately so user sees typed text while async query runs
         try {
             auto &panel = ic->inputPanel();
-            panel.reset();
-            if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
-                panel.setClientPreedit(fcitx::Text(buffer_));
-                ic->updatePreedit();
+            // FIX: Do NOT reset the panel for every key press; only clear when buffer is empty.
+            if (buffer_.empty()) {
+                panel.reset();
             } else {
-                panel.setPreedit(fcitx::Text(buffer_));
-                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+                    panel.setClientPreedit(fcitx::Text(buffer_));
+                    ic->updatePreedit();
+                } else {
+                    panel.setPreedit(fcitx::Text(buffer_));
+                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                }
             }
         } catch (...) {}
 
