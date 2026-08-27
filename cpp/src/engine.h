@@ -3,60 +3,47 @@
 #ifdef HAVE_FCITX5
 
 #include <fcitx/addonfactory.h>
+#include <fcitx/inputmethodengine.h>
+#include <fcitx/instance.h>
+#include <fcitx/text.h>              // must come before candidatelist.h
+#include <fcitx/candidatelist.h>     // for CandidateWord
+#include <fcitx/inputcontext.h>      // for InputContext
+#include <fcitx-utils/event.h>       // for EventSource
 #include <atomic>
 #include <mutex>
 #include <memory>
-#include <fcitx/inputmethodengine.h>
-#include <fcitx/instance.h>
 
-using namespace fcitx;
-
-// Forward declare EventSource so engine.h can hold a unique_ptr without
-// including the eventloop interface header here.
-namespace fcitx { struct EventSource; }
-
-// Minimal compatibility layer: implement the small set of virtuals required by
-// the platform's InputMethodEngine interface. This keeps the engine concrete
-// and lets fcitx5 discover and load the addon. The implementation is a
-// no-op prototype; later it can be extended to use query_daemon().
-
-class GoogleIMEEngine : public InputMethodEngine {
+class GoogleIMEEngine : public fcitx::InputMethodEngine {
 public:
-    explicit GoogleIMEEngine(Instance *instance = nullptr) : instance_(instance) {}
+    explicit GoogleIMEEngine(fcitx::Instance *instance = nullptr) : instance_(instance) {}
     ~GoogleIMEEngine() override = default;
 
-    // Match the platform API: keyEvent signature is library-specific.
-    void keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) override;
-
-    // Reset is called when an InputContext is cleared (focus out / cancel).
-    // Implementations should clear any composition buffer and hide candidates.
-    void reset(const InputMethodEntry &entry, InputContextEvent &event) override;
+    void keyEvent(const fcitx::InputMethodEntry &entry, fcitx::KeyEvent &keyEvent) override;
+    void reset(const fcitx::InputMethodEntry &entry, fcitx::InputContextEvent &event) override;
+    void updateUI(fcitx::InputContext* ic,
+                  std::vector<std::string> candidates,
+                  std::string probe,
+                  uint64_t mySeq);
 
 private:
-    // Sequence id for in-flight queries. Each new query increments the id;
-    // deferred result handlers check it to decide whether their result is
-    // stale and should be discarded.
+    // Private nested candidate word class.
+    class MyCandidateWord : public fcitx::CandidateWord {
+    public:
+        explicit MyCandidateWord(fcitx::Text text);
+        void select(fcitx::InputContext* ic) const override;
+        fcitx::Text text() const;   // remove override
+    private:
+        fcitx::Text text_;
+    };
+
     std::atomic<uint64_t> querySeq{0};
-    // Instance pointer injected by factory so addon can post to the main loop
-    // without relying on InputContext API variability.
-    Instance *instance_{nullptr};
-
-    // Composition buffer tracking typed text
+    fcitx::Instance *instance_{nullptr};
     std::string buffer_;
-
-    // Keep pending EventSource objects alive until their deferred callbacks run.
-    // Use a container so multiple in-flight events do not cancel each other by
-    // overwriting a single unique_ptr instance.
-    std::vector<std::unique_ptr<fcitx::EventSource>> pendingEvents_;
-    std::mutex pendingEventMutex_;
-
-    // Helper: remove an EventSource* from pendingEvents_ (called on main thread)
-    void removePendingEvent(fcitx::EventSource *src);
 };
 
-class GoogleIMEFactory : public AddonFactory {
+class GoogleIMEFactory : public fcitx::AddonFactory {
 public:
-    AddonInstance *create(AddonManager *manager) override;
+    fcitx::AddonInstance *create(fcitx::AddonManager *manager) override;
 };
 
 #endif // HAVE_FCITX5
