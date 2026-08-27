@@ -5,6 +5,7 @@
 #include <thread>
 #include <iostream>
 #include <memory>
+#include <cstdlib>
 #include <fcitx/candidatelist.h>
 #include <fcitx/event.h>
 #include <fcitx/addonmanager.h>
@@ -121,7 +122,25 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
 
                     std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
                     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-#endif
+
+                    // Developer test hook: force server-side preedit + candidate UI when
+                    // GOOGLE_IME_TEST_FORCE_SERVER_PANEL=1 is set in the environment.
+                    // This is strictly diagnostic and disabled by default so no fallback
+                    // behavior is introduced in normal runs.
+                    const char *force = std::getenv("GOOGLE_IME_TEST_FORCE_SERVER_PANEL");
+                    if (force && std::string(force) == "1") {
+                        std::cerr << "GoogleIMEEngine: TEST_HOOK forcing server-side preedit + candidate UI\n";
+                        // Rebuild a CommonCandidateList from the candidate strings
+                        auto testList = std::make_unique<fcitx::CommonCandidateList>();
+                        for (size_t i = 0; i < candidates.size(); ++i) {
+                            testList->insert(static_cast<int>(i), std::make_unique<fcitx::CandidateWord>(fcitx::Text(candidates[i])));
+                        }
+                        // Force server-side preedit and candidate list update
+                        panel.setPreedit(fcitx::Text(probe));
+                        panel.setCandidateList(std::move(testList));
+                        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                    }
+
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
