@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef HAVE_FCITX5
-
 #include <fcitx/addonfactory.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
@@ -47,5 +45,3 @@ class GoogleIMEFactory : public fcitx::AddonFactory {
 public:
     fcitx::AddonInstance *create(fcitx::AddonManager *manager) override;
 };
-
-#endif // HAVE_FCITX5
