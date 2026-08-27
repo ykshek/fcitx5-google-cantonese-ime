@@ -13,30 +13,7 @@
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/eventloopinterface.h>
 
-// Probe for common fcitx5 UI header locations and include what exists.
-// This keeps the code portable across distros and header layout variations.
-#if defined(__has_include)
-#  if __has_include(<fcitx/inputpanel.h>) && __has_include(<fcitx/candidate.h>) && __has_include(<fcitx/text.h>)
-#    include <fcitx/inputpanel.h>
-#    include <fcitx/candidate.h>
-#    include <fcitx/text.h>
-#    define HAVE_FCITX5_UI 1
-#  elif __has_include(<fcitx/inputpanel.h>) && __has_include(<fcitx-utils/candidate-common.h>) && __has_include(<fcitx/text.h>)
-#    include <fcitx/inputpanel.h>
-#    include <fcitx-utils/candidate-common.h>
-#    include <fcitx/text.h>
-#    define HAVE_FCITX5_UI 1
-#  elif __has_include(<fcitx/inputpanel.h>) && __has_include(<fcitx/module/candidateList.h>) && __has_include(<fcitx/text.h>)
-#    include <fcitx/inputpanel.h>
-#    include <fcitx/module/candidateList.h>
-#    include <fcitx/text.h>
-#    define HAVE_FCITX5_UI 1
-#  else
-#    define HAVE_FCITX5_UI 0
-#  endif
-#else
-#  define HAVE_FCITX5_UI 0
-#endif
+#define HAVE_FCITX5_UI 1
 
 using namespace fcitx;
 
