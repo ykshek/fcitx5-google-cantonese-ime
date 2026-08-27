@@ -37,47 +37,76 @@ using namespace fcitx;
 void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) {
     (void)entry;
 
-    // Keep keyEvent lightweight: log invocation and perform a quick
-    // synchronous probe (prototype). Replace with event-loop async later.
+    // Async query: bump sequence, run daemon call in background, then
+    // post UI update to the main EventLoop so UI changes happen on the
+    // main thread.
     try {
-        std::cerr << "GoogleIMEEngine: keyEvent invoked\n";
+        std::cerr << "GoogleIMEEngine: keyEvent invoked (async)\n";
         auto ic = keyEvent.inputContext();
         if (!ic) {
             std::cerr << "GoogleIMEEngine: no input context\n";
             return;
         }
 
-        // TODO: compute actual composition buffer from KeyEvent; use probe
+        // TODO: derive probe from actual composition buffer
         std::string probe = "test";
-        auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
-        std::cerr << "GoogleIMEEngine: daemon returned " << candidates.size() << " candidates\n";
 
+        uint64_t mySeq = ++querySeq;
+
+        std::thread worker([probe = std::move(probe), mySeq, ic, this]() mutable {
+            try {
+                auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
+                std::cerr << "GoogleIMEEngine(worker): daemon returned " << candidates.size() << " candidates\n";
+
+                auto inst = ic->instance();
+                if (!inst) {
+                    std::cerr << "GoogleIMEEngine: no instance when posting result\n";
+                    return;
+                }
+                auto loop = inst->eventLoop();
+                if (!loop) {
+                    std::cerr << "GoogleIMEEngine: no event loop\n";
+                    return;
+                }
+
+                // post deferred event to the main loop
+                loop->addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *) -> bool {
+                    if (querySeq != mySeq) {
+                        std::cerr << "GoogleIMEEngine: stale result, drop\n";
+                        return false;
+                    }
 #if HAVE_FCITX5_UI
-        // Build fcitx5 CandidateList and show in input panel.
-        // Use CommonCandidateList (a helper that implements paging and layout)
-        auto tmp = std::make_unique<fcitx::CommonCandidateList>();
-        for (size_t i = 0; i < candidates.size(); ++i) {
-            fcitx::Text t(candidates[i]);
-            auto cw = std::make_unique<fcitx::CandidateWord>(t);
-            tmp->insert(static_cast<int>(i), std::move(cw));
-        }
+                    auto tmp = std::make_unique<fcitx::CommonCandidateList>();
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        fcitx::Text t(candidates[i]);
+                        auto cw = std::make_unique<fcitx::CandidateWord>(t);
+                        tmp->insert(static_cast<int>(i), std::move(cw));
+                    }
 
-        auto &panel = ic->inputPanel();
-        panel.setClientPreedit(fcitx::Text(probe));
-        // CommonCandidateList derives from CandidateList; move-convert unique_ptr.
-        panel.setCandidateList(std::move(tmp));
-        ic->updatePreedit();
+                    auto &panel = ic->inputPanel();
+                    panel.setClientPreedit(fcitx::Text(probe));
+                    panel.setCandidateList(std::move(tmp));
+                    ic->updatePreedit();
 #else
-        // UI headers missing: just log the candidate set for debugging.
-        for (size_t i = 0; i < candidates.size(); ++i) {
-            std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
-        }
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
+                    }
 #endif
+                    return false; // run once
+                });
+
+            } catch (const std::exception &e) {
+                std::cerr << "GoogleIMEEngine(worker): exception: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "GoogleIMEEngine(worker): unknown exception\n";
+            }
+        });
+        worker.detach();
 
     } catch (const std::exception &e) {
-        std::cerr << "GoogleIMEEngine: exception: " << e.what() << "\n";
+        std::cerr << "GoogleIMEEngine: exception scheduling worker: " << e.what() << "\n";
     } catch (...) {
-        std::cerr << "GoogleIMEEngine: unknown exception\n";
+        std::cerr << "GoogleIMEEngine: unknown exception scheduling worker\n";
     }
 }
 

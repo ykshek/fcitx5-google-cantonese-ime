@@ -18,12 +18,18 @@ public:
     GoogleIMEEngine() = default;
     ~GoogleIMEEngine() override = default;
 
-    // Match the platform API: keyEvent signature is library-specific. Use the
-    // signature shown by the build errors: keyEvent(const InputMethodEntry&, KeyEvent&).
+    // Match the platform API: keyEvent signature is library-specific.
     void keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) override;
 
-    // Provide a simple reset hook. Signature may vary; provide a generic one.
-    void reset(InputContext *ic) { }
+    // Reset is called when an InputContext is cleared (focus out / cancel).
+    // Implementations should clear any composition buffer and hide candidates.
+    void reset(InputContext *ic) override { (void)ic; }
+
+private:
+    // Sequence id for in-flight queries. Each new query increments the id;
+    // deferred result handlers check it to decide whether their result is
+    // stale and should be discarded.
+    std::atomic<uint64_t> querySeq{0};
 };
 
 class GoogleIMEFactory : public AddonFactory {
