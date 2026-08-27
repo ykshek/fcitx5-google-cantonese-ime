@@ -69,14 +69,10 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     std::cerr << "GoogleIMEEngine: no instance available to post result\n";
                     return;
                 }
-                auto loop = inst->eventLoop();
-                if (!loop) {
-                    std::cerr << "GoogleIMEEngine: no event loop\n";
-                    return;
-                }
+                auto &loop = inst->eventLoop();
 
                 // post deferred event to the main loop
-                loop->addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *) -> bool {
+                loop.addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *) -> bool {
                     if (querySeq != mySeq) {
                         std::cerr << "GoogleIMEEngine: stale result, drop\n";
                         return false;
