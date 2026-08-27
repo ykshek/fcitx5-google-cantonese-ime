@@ -1,5 +1,3 @@
-#ifdef HAVE_FCITX5
-
 #include "engine.h"
 #include "daemon_client.h" // call query_daemon() from daemon_client.cc when needed
 #include <thread>
@@ -26,46 +24,17 @@ fcitx::Text GoogleIMEEngine::MyCandidateWord::text() const {
     return text_;   // returns a copy
 }
 
-/*class UpdateUIEvent : public fcitx::Event {
-public:
-    UpdateUIEvent(fcitx::InputContext* ic,
-                  std::vector<std::string> candidates,
-                  std::string probe,
-                  uint64_t mySeq,
-                  GoogleIMEEngine* engine)
-    : Event(fcitx::EventType::Post),
-    ic_(ic),
-    candidates_(std::move(candidates)),
-    probe_(std::move(probe)),
-    mySeq_(mySeq),
-    engine_(engine) {}
-
-    void call(fcitx::EventLoop* ) override {
-        engine_->updateUI(ic_, std::move(candidates_), std::move(probe_), mySeq_);
-    }
-
-private:
-    fcitx::InputContext* ic_;
-    std::vector<std::string> candidates_;
-    std::string probe_;
-    uint64_t mySeq_;
-    GoogleIMEEngine* engine_;
-};
-*/
-
 void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
                                std::vector<std::string> candidates,
                                std::string probe,
                                uint64_t mySeq) {
-    std::cerr << "GoogleIMEEngine(updateUI): running (mySeq=" << mySeq << ", querySeq=" << querySeq << ")\n";
+    std::cerr << "GoogleIMEEngine(updateUI): entered (mySeq=" << mySeq << ", querySeq=" << querySeq << ")\n";
 
-    // Stale result?
     if (querySeq != mySeq) {
         std::cerr << "GoogleIMEEngine: stale result, drop\n";
         return;
     }
 
-    // Buffer cleared? Hide panel.
     if (buffer_.empty()) {
         std::cerr << "GoogleIMEEngine: buffer cleared before result, hiding panel\n";
         ic->inputPanel().reset();
@@ -74,7 +43,6 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
         return;
     }
 
-    #if HAVE_FCITX5_UI
     std::cerr << "GoogleIMEEngine: populating candidate list (count=" << candidates.size() << ")\n";
     auto tmp = std::make_unique<fcitx::CommonCandidateList>();
     for (size_t i = 0; i < candidates.size(); ++i) {
@@ -87,12 +55,12 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
     auto &panel = ic->inputPanel();
     std::cerr << "GoogleIMEEngine: reset panel and set preedit\n";
     panel.reset();
-    std::cerr << "GoogleIMEEngine: capabilityFlags=" << static_cast<unsigned long>(ic->capabilityFlags()) << "\n";
 
+    // Set preedit
     if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
         panel.setClientPreedit(fcitx::Text(probe));
-        std::cerr << "GoogleIMEEngine: called setClientPreedit and updatePreedit()\n";
         ic->updatePreedit();
+        std::cerr << "GoogleIMEEngine: called setClientPreedit and updatePreedit()\n";
     } else {
         panel.setPreedit(fcitx::Text(probe));
         std::cerr << "GoogleIMEEngine: called setPreedit\n";
@@ -101,17 +69,20 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
     std::cerr << "GoogleIMEEngine: setting candidate list\n";
     panel.setCandidateList(std::move(tmp));
     auto cl = panel.candidateList();
-    std::cerr << "GoogleIMEEngine: panel.empty()=" << (panel.empty() ? "true" : "false") << ", candidateList=" << (cl ? "present" : "null") << "\n";
+    std::cerr << "GoogleIMEEngine: panel.empty()=" << (panel.empty() ? "true" : "false")
+    << ", candidateList=" << (cl ? "present" : "null") << "\n";
     if (cl) {
         if (auto common = dynamic_cast<fcitx::CommonCandidateList*>(cl.get())) {
             std::cerr << "GoogleIMEEngine: candidateList.size()=" << common->size() << "\n";
         }
     }
 
-    std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel)\n";
+    // Force UI update: call both updatePreedit and updateUserInterface
+    ic->updatePreedit();
     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    std::cerr << "GoogleIMEEngine: updateUserInterface(InputPanel) called\n";
 
-    // Test hook (optional)
+    // Optional test hook
     const char *force = std::getenv("GOOGLE_IME_TEST_FORCE_SERVER_PANEL");
     if (force && std::string(force) == "1") {
         std::cerr << "GoogleIMEEngine: TEST_HOOK forcing server-side preedit + candidate UI\n";
@@ -124,19 +95,12 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 
-    // Final buffer check (if user typed more while waiting)
+    // Final buffer check
     if (buffer_ != probe) {
         std::cerr << "GoogleIMEEngine: buffer changed (current='" << buffer_ << "', probe='" << probe << "'), ignoring result\n";
         return;
     }
-    #endif
-
-    for (size_t i = 0; i < candidates.size(); ++i) {
-        std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
-    }
 }
-
-#define HAVE_FCITX5_UI 1
 
 using namespace fcitx;
 
@@ -169,7 +133,6 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
             sym = 0;
         }
         // Check if there is an active candidate list
-        #if HAVE_FCITX5_UI
         auto cl = ic->inputPanel().candidateList();
         if (cl && cl->size() > 0) {
             // Space key commits the first candidate (index 0)
@@ -198,7 +161,6 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 return;
             }
         }
-        #endif
         if (sym >= 32 && sym <= 126) {
             buffer_.push_back(static_cast<char>(sym));
             // consume the key so the client doesn't receive the character
@@ -213,9 +175,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 try { ic->commitString(buffer_); } catch (...) {}
                 buffer_.clear();
                 // hide panel
-#if HAVE_FCITX5_UI
                 ic->inputPanel().reset();
-#endif
                 try { ic->updatePreedit(); } catch (...) {}
                 try { ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel); } catch (...) {}
                 try { keyEvent.filterAndAccept(); } catch (...) {}
@@ -227,7 +187,6 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
         }
 
         // Update preedit immediately so user sees typed text while async query runs
-#if HAVE_FCITX5_UI
         try {
             auto &panel = ic->inputPanel();
             panel.reset();
@@ -239,7 +198,6 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
             }
         } catch (...) {}
-#endif
 
         // Use the current composition buffer as probe
         std::string probe = buffer_;
@@ -259,14 +217,25 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     return;
                 }
                 auto &loop = inst->eventLoop();
-
-                // post deferred event to the main loop. Keep returned EventSource
-                // alive in the engine until the callback runs so it is not destroyed
-                // prematurely.
-                loop.addPostEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource* /*src*/) -> bool {
+                auto source = loop.addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource* src) -> bool {
+                    std::cerr << "GoogleIMEEngine: deferEvent callback running\n";
                     this->updateUI(ic, std::move(candidates), std::move(probe), mySeq);
+                    // Remove ourselves from pendingEvents_
+                    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                    for (auto it = pendingEvents_.begin(); it != pendingEvents_.end(); ++it) {
+                        if (it->get() == src) {
+                            pendingEvents_.erase(it);
+                            break;
+                        }
+                    }
                     return false; // one-shot
                 });
+
+                {
+                    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                    pendingEvents_.push_back(std::move(source));
+                }
+                (void)source; // suppress unused variable warning
 
             } catch (const std::exception &e) {
                 std::cerr << "GoogleIMEEngine(worker): exception: " << e.what() << "\n";
@@ -286,12 +255,12 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
 // Reset engine state when the input context is cleared.
 void GoogleIMEEngine::reset(const InputMethodEntry &entry, InputContextEvent &event) {
     (void)entry;
+    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+    pendingEvents_.clear();
     buffer_.clear();
     auto ic = event.inputContext();
     if (ic) {
-#if HAVE_FCITX5_UI
         ic->inputPanel().reset();
-#endif
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
@@ -304,5 +273,3 @@ AddonInstance *GoogleIMEFactory::create(AddonManager *manager) {
 
 // Register addon factory using the macro that takes a single identifier
 FCITX_ADDON_FACTORY(GoogleIMEFactory)
-
-#endif // HAVE_FCITX5

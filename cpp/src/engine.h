@@ -39,6 +39,8 @@ private:
     std::atomic<uint64_t> querySeq{0};
     fcitx::Instance *instance_{nullptr};
     std::string buffer_;
+    std::vector<std::unique_ptr<fcitx::EventSource>> pendingEvents_;
+    std::mutex pendingEventMutex_;
 };
 
 class GoogleIMEFactory : public fcitx::AddonFactory {
