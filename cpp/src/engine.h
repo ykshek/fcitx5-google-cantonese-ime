@@ -4,6 +4,8 @@
 
 #include <fcitx/addonfactory.h>
 #include <atomic>
+#include <mutex>
+#include <memory>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
@@ -34,6 +36,10 @@ private:
     // Instance pointer injected by factory so addon can post to the main loop
     // without relying on InputContext API variability.
     Instance *instance_{nullptr};
+
+    // Keep pending EventSource alive until the deferred callback has run.
+    std::unique_ptr<fcitx::EventSource> pendingEvent_;
+    std::mutex pendingEventMutex_;
 };
 
 class GoogleIMEFactory : public AddonFactory {

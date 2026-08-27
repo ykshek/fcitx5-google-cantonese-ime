@@ -71,31 +71,52 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                 }
                 auto &loop = inst->eventLoop();
 
-                // post deferred event to the main loop
-                loop.addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *) -> bool {
+                // post deferred event to the main loop. Keep returned EventSource
+                // alive in the engine until the callback runs so it is not destroyed
+                // prematurely.
+                auto ev = loop.addDeferEvent([ic, candidates = std::move(candidates), probe = std::move(probe), mySeq, this](fcitx::EventSource *src) -> bool {
+                    std::cerr << "GoogleIMEEngine(deferred): callback running (mySeq=" << mySeq << ", querySeq=" << querySeq << ")\n";
                     if (querySeq != mySeq) {
                         std::cerr << "GoogleIMEEngine: stale result, drop\n";
+                        // clear pendingEvent_ on main thread
+                        std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                        pendingEvent_.reset();
                         return false;
                     }
 #if HAVE_FCITX5_UI
+                    std::cerr << "GoogleIMEEngine: populating candidate list (count=" << candidates.size() << ")\n";
                     auto tmp = std::make_unique<fcitx::CommonCandidateList>();
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         fcitx::Text t(candidates[i]);
+                        std::cerr << "  candidate[" << i << "]=" << t.toString() << "\n";
                         auto cw = std::make_unique<fcitx::CandidateWord>(t);
                         tmp->insert(static_cast<int>(i), std::move(cw));
                     }
 
                     auto &panel = ic->inputPanel();
+                    std::cerr << "GoogleIMEEngine: setting client preedit/ candidate list\n";
                     panel.setClientPreedit(fcitx::Text(probe));
                     panel.setCandidateList(std::move(tmp));
+                    std::cerr << "GoogleIMEEngine: updatePreedit()\n";
                     ic->updatePreedit();
 #else
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
 #endif
+                    // clear pendingEvent_ on main thread
+                    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                    pendingEvent_.reset();
                     return false; // run once
                 });
+
+                if (ev) {
+                    std::lock_guard<std::mutex> lk(pendingEventMutex_);
+                    pendingEvent_ = std::move(ev);
+                    std::cerr << "GoogleIMEEngine: deferred event scheduled and stored\n";
+                } else {
+                    std::cerr << "GoogleIMEEngine: addDeferEvent returned null\n";
+                }
 
             } catch (const std::exception &e) {
                 std::cerr << "GoogleIMEEngine(worker): exception: " << e.what() << "\n";
