@@ -125,7 +125,6 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         std::cerr << "  cand[" << i << "]=" << candidates[i] << "\n";
                     }
-#endif
                     // clear pendingEvent_ on main thread
                     std::lock_guard<std::mutex> lk(pendingEventMutex_);
                     pendingEvent_.reset();
