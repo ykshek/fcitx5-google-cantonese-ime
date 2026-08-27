@@ -11,6 +11,10 @@
 
 using namespace fcitx;
 
+// Forward declare EventSource so engine.h can hold a unique_ptr without
+// including the eventloop interface header here.
+namespace fcitx { struct EventSource; }
+
 // Minimal compatibility layer: implement the small set of virtuals required by
 // the platform's InputMethodEngine interface. This keeps the engine concrete
 // and lets fcitx5 discover and load the addon. The implementation is a
