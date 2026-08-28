@@ -86,7 +86,6 @@ just install           # copy the .so + metadata into /usr/local/.../fcitx5
 Very rudimentary for now, use `just install`, which copies the relevant files to the correct places. However, note that you may also have to either:
 
 - `sudo cp /usr/local/lib/fcitx5/libfcitx5-google-ime.so /usr/lib64/fcitx5/libfcitx5-google-ime.so`, or
-- `echo "/usr/local/lib" | sudo tee -a /etc/ld.so.conf.d/google-ime.conf`
 
 as otherwise `fcitx5` may not recognize the `.so` in `/usr/local`.
 
