@@ -6,6 +6,8 @@ This IME thingamajig uses HTTP GET requests to Google Input Tools to send your i
 
 ## fcitx5 Google Input Tools IME
 
+<img width="408" height="430" alt="20260828_094513" src="https://github.com/user-attachments/assets/94b6bf97-dcc7-40bf-b2af-6dee55f281e1" />
+
 This project provides a prototype that connects fcitx5 to Google Input Tools. (and make it so that I don't have to open a browser everytime I want to type Cantonese)
 
 Structure:
