@@ -95,12 +95,19 @@ After installing, restart fcitx5 (`fcitx5 -r -d`) and add the "Google IME" input
 ## Usage
 
 - Type romanized input (latin letters). The preedit shows what you typed.
-- Candidates appear automatically; press `1`–`9` to select one, or `Space` for the first.
-- `Enter` commits the raw buffer (the typed latin letters) if no candidate is selected.
-- `Backspace` deletes the last character.
+- Candidates appear automatically after a short debounce; press `1`-`9` (and `0`) to select one, or `Space` for the highlighted candidate.
+- `Up`/`Down` move the highlight through the candidate list, wrapping across pages at the boundaries. `PageUp`/`PageDown` switch candidate pages directly.
+- `Enter` commits the raw buffer (the typed latin letters) as an escape hatch.
+- `Backspace` deletes the last character of the query and re-queries Google.
+- `Escape` cancels the current composition.
+
+## Behavior notes
+
+- **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). The official "try" page coalesces rapid keystrokes client-side rather than firing one request per key, so this plugin does the same: a 150 ms debounce timer is reset on every keystroke, so only the final query is sent. Stale in-flight responses are discarded via a per-input-context generation counter, so fast typing can never show an outdated candidate list.
+- **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields no longer corrupts the composition.
 
 ## Notes
 
 `engine.cc` is a feature-complete fcitx5 `InputMethodEngine` that builds against `Fcitx5::Core` and implements the full keypress → async Google query → candidate panel → commit loop.
 
-Most other things are unfinished and will have a lot of bugs. Known gaps: no candidate paging (only first 8, no PageUp/Down), no arrow-key cursor movement among candidates, no config UI despite the addon being marked `Configurable=True`, and per-keystroke network round trips with no result caching.
+Most other things are unfinished and will have a lot of bugs. Known gaps: no config UI despite the addon being marked `Configurable=True`, and no result caching across identical queries.
