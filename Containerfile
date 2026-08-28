@@ -7,7 +7,9 @@ RUN dnf5 -y update && \
         cmake \
         gcc-c++ \
         make \
+        git \
         libcurl-devel \
+        json-devel \
         pkgconfig \
         fcitx5-devel \
         fcitx5-qt-devel \
