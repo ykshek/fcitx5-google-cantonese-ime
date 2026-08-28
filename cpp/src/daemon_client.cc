@@ -79,6 +79,7 @@ public:
         // libcurl build that flips a default). This is what keeps the TCP+TLS
         // connection to Google warm across requests.
         curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 0L);
+        curl_easy_setopt(handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
         curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
         curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
