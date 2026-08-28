@@ -54,7 +54,22 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // with how many bytes of `preedit` (from the front) each one consumes.
     // The panel renders a kPageSize-wide window into this vector starting at
     // `page * kPageSize`.
+    //
+    // The list is intentionally NOT cleared immediately when the user keeps
+    // typing (unlike the old behavior, which hid the list until the next
+    // response arrived, making typing feel jumpy and flickery). Instead the
+    // old list stays visible as a best-effort preview while the new lookup is
+    // in flight, and is replaced atomically when the fresh result lands in
+    // applyCandidates(). Because stale candidates can have matchedLength
+    // values that are wrong relative to the new (longer) preedit, selection
+    // paths consult candidatesFresh() — which compares this probe string to
+    // a freshly built probe for the current state — before they commit anything.
     std::vector<GoogleCandidate> candidates;
+
+    // Snapshot of buildProbe() at the time the candidates were last computed.
+    // Used by candidatesFresh() to guard selection paths from committing an
+    // out-of-date candidate list while a newer lookup is still in flight.
+    std::string candidatesProbe;
 
     // Current candidate page (0-based) and the highlighted candidate index
     // within the current page (-1 = none highlighted).
@@ -183,15 +198,23 @@ private:
     class MyCandidateWord : public fcitx::CandidateWord {
     public:
         MyCandidateWord(fcitx::Text text, GoogleIMEEngine *engine,
-                        std::string candText, int matchedLength)
+                        std::string candText, int matchedLength,
+                        std::string probe)
             : fcitx::CandidateWord(std::move(text)), engine_(engine),
-              candText_(std::move(candText)), matchedLength_(matchedLength) {}
+              candText_(std::move(candText)), matchedLength_(matchedLength),
+              probe_(std::move(probe)) {}
         void select(fcitx::InputContext *ic) const override;
 
     private:
         GoogleIMEEngine *engine_ = nullptr;
         std::string candText_;
         int matchedLength_ = 0;
+        // Snapshot of buildProbe(state) at render time. select() compares this
+        // against the current state's candidatesProbe to refuse committing an
+        // out-of-date candidate object that was rendered for an earlier keystroke
+        // but is still on screen when the user clicks it. This matters most
+        // when the list is kept visible as a preview during in-flight updates.
+        std::string probe_;
     };
 
     // Build the probe string sent to Google: just the preedit when there is
@@ -204,6 +227,15 @@ private:
     // Trim `committed` down to the last kMaxContextChars UTF-8 codepoints,
     // matching the sliding window Google's own client uses.
     void trimCommitted(GoogleIMEState *state) const;
+
+    // True if the candidate list in `state` was computed from the *current*
+    // committed context + preedit (i.e. buildProbe(state) matches
+    // state->candidatesProbe). When false, the visible candidates belong to an
+    // earlier keystroke and their matchedLength values are stale relative to
+    // the (now longer) preedit — selection paths must treat the list as
+    // unselectable and force a fresh lookup instead of committing a stale
+    // candidate.
+    bool candidatesFresh(const GoogleIMEState *state) const;
 
     // Emit one full-width punctuation character (see kPunctuationMap in
     // engine.cc). If there is an active composition, first resolves it: picks

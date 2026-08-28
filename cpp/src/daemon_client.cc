@@ -32,6 +32,141 @@ size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     return size * nmemb;
 }
 
+// --- Reusable libcurl easy-handle pool ---
+//
+// The IME fires one Google request per keystroke. If each request created a
+// brand-new CURL handle (as the original code did via curl_easy_init +
+// curl_easy_cleanup), every lookup would pay for a fresh TCP connect + TLS
+// handshake (~50-100ms) against inputtools.google.com — by far the dominant
+// component of perceived typing latency, and the main reason the IME felt
+// noticeably laggier than typing directly on Google's own web page (where the
+// browser keeps a single persistent connection warm across requests).
+//
+// To avoid that, we keep a small pool of already-initialized CURL handles and
+// reuse them across requests. libcurl's per-handle connection cache then keeps
+// the underlying TCP+TLS connection to Google alive (HTTP/1.1 keep-alive) so
+// subsequent requests reuse the existing connection instead of reconnecting.
+//
+// Pooling (rather than a single shared handle behind a mutex) is intentional:
+// fast typing can have more than one request in flight at a time (a new lookup
+// is fired before the previous one has completed), and a single handle would
+// serialize them, making the newest query wait behind a now-stale older one.
+// A pool lets concurrent requests run in parallel while still reusing warmed
+// connections once they are returned to the pool.
+//
+// Thread-safety: the pool vector and its idle count are guarded by a mutex.
+// Each worker thread checks out one handle for the duration of curl_easy_perform
+// and returns it to the idle pool when done (RAII via PooledHandle below).
+//
+// If the pool is momentarily empty when a request arrives (all handles busy),
+// we spin up an extra handle on the spot so that request is never blocked
+// behind an in-flight one. Returned handles are kept idle up to a small cap;
+// extra handles beyond that are simply cleaned up to avoid unbounded growth.
+class CurlHandlePool {
+public:
+    // Upper bound on idle handles we keep around between bursts. Plenty for
+    // realistic typing concurrency, and bounded so idle handles don't leak.
+    static constexpr size_t kMaxIdle = 8;
+
+    // Configure all of these on a freshly created handle so that EVERY
+    // request reusing it inherits them automatically after a curl_easy_reset
+    // (curl_easy_reset resets all options but leaves the connection cache
+    // intact, which is what we rely on for keep-alive). These defaults are
+    // static per request, so configuring them once in the constructor is fine.
+    static void applyStaticOptions(CURL* handle) {
+        // Explicitly allow connection reuse (the defaults already favor reuse,
+        // but setting these documents the intent and guards against a future
+        // libcurl build that flips a default). This is what keeps the TCP+TLS
+        // connection to Google warm across requests.
+        curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 0L);
+        curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
+        curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+        curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+        // TCP keepalive probes keep the idle connection alive so Google's load
+        // balancer doesn't close it between keystrokes during a pause.
+        curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
+        curl_easy_setopt(handle, CURLOPT_USERAGENT,
+                         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+    }
+
+    CURL* acquire() {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (!idle_.empty()) {
+            CURL* handle = idle_.back();
+            idle_.pop_back();
+            return handle;
+        }
+        // All pooled handles are busy: create a new one so this request can run
+        // in parallel rather than waiting. curl_easy_init may return null on a
+        // truly catastrophic failure (out of memory), which the caller handles
+        // by treating it as an empty result.
+        CURL* handle = curl_easy_init();
+        if (handle) {
+            applyStaticOptions(handle);
+        }
+        return handle;
+    }
+
+    void release(CURL* handle) {
+        if (!handle) return;
+        // Reset all options to their defaults for the next request, but keep
+        // the connection cache (which curl_easy_reset does NOT touch). This is
+        // what lets the next request reuse the existing TCP+TLS connection.
+        curl_easy_reset(handle);
+        // Re-apply the static options that the reset just cleared (these are
+        // the per-handle settings we always want to keep set across requests,
+        // since they don't change per keystroke).
+        applyStaticOptions(handle);
+
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (idle_.size() >= kMaxIdle) {
+            // Too many idle handles: clean this one up to avoid leaking.
+            curl_easy_cleanup(handle);
+        } else {
+            idle_.push_back(handle);
+        }
+    }
+
+    ~CurlHandlePool() {
+        std::lock_guard<std::mutex> lk(mutex_);
+        for (CURL* handle : idle_) {
+            if (handle) curl_easy_cleanup(handle);
+        }
+        idle_.clear();
+    }
+
+private:
+    std::vector<CURL*> idle_;
+    std::mutex mutex_;
+};
+
+// Singleton pool. Intentionally never destroyed: a function-local static
+// would otherwise be torn down at process/addon-unload time, but detached
+// worker threads may still be mid-request holding a pooled handle or about to
+// return one to the pool at that moment — destroying the pool (and cleaning up
+// its CURL handles) out from under them would be a use-after-free. Making it
+// process-lifetime (heap-allocated, never freed) trades a bounded leak of at
+// most kMaxIdle idle CURL handles for shutdown safety. This mirrors why we also
+// skip curl_global_cleanup() for the same detached-worker reason.
+CurlHandlePool& handlePool() {
+    static auto *pool = new CurlHandlePool;
+    return *pool;
+}
+
+// RAII wrapper that always returns a borrowed handle back to the pool, even if
+// curl_easy_perform throws or the caller returns early (e.g. on a parse
+// error). This is what guarantees we never leak a handle out of the pool.
+struct PooledHandle {
+    CURL* handle;
+    explicit PooledHandle() : handle(handlePool().acquire()) {}
+    ~PooledHandle() {
+        if (handle) handlePool().release(handle);
+    }
+    PooledHandle(const PooledHandle&) = delete;
+    PooledHandle& operator=(const PooledHandle&) = delete;
+};
+
 // Build the request URL with proper URL-encoding for the query parameters.
 // Note: Google's endpoint expects `text=` (the old daemon accepted `q=` and
 // translated it to `text` internally); we pass `text` directly here.
@@ -59,7 +194,8 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
 
     ensure_curl_global_init();
 
-    CURL* curl = curl_easy_init();
+    PooledHandle pooled;
+    CURL* curl = pooled.handle;
     if (!curl) {
         std::cerr << "get_candidates: curl_easy_init failed\n";
         return out;
@@ -71,22 +207,12 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    // NOSIGNAL avoids libcurl using signals for DNS timeouts, which is unsafe
-    // in multi-threaded code (this runs on detached worker threads in fcitx5).
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    // A normal browser-like User-Agent avoids being filtered out by naive
-    // server-side checks on the public endpoint.
-    curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36");
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
         std::cerr << "get_candidates: curl error: " << curl_easy_strerror(res)
@@ -97,6 +223,7 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
         std::cerr << "get_candidates: HTTP " << http_code << "\n";
         return out;
     }
+
 
     // Google Input Tools response shape:
     //   ["SUCCESS", [["<echoed preedit>", ["cand1", "cand2", ...], [], {"matched_length":[...], "annotation":[...], ...}]]]

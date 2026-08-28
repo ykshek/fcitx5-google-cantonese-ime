@@ -58,6 +58,27 @@ void GoogleIMEEngine::MyCandidateWord::select(
     fcitx::InputContext *ic) const {
     // Mouse-click / keyboard selection both funnel through this one path,
     // which carries matchedLength so partial (word-by-word) selection works.
+    //
+    // Because we now keep old candidates visible as a preview while a newer
+    // lookup is in flight, the candidate object the user clicked may belong to
+    // an earlier keystroke and have a matchedLength that's wrong for the
+    // current (changed) preedit. Guard against BOTH staleness cases:
+    //   (a) this word's render-time probe no longer matches the state's
+    //       candidatesProbe — a newer list has since replaced this one; and
+    //   (b) the current visible list itself is stale (candidatesFresh() false)
+    //       — the list is still the old one because the new lookup hasn't
+    //       returned yet, but the preedit has changed since it was computed.
+    // In either case, do NOT commit; fire a fresh lookup for the current
+    // preedit so the user gets up-to-date candidates to choose from.
+    auto *state = ic ? ic->propertyFor(&engine_->stateFactory_) : nullptr;
+    if (!state || probe_ != state->candidatesProbe ||
+        !engine_->candidatesFresh(state)) {
+        if (state && !state->preedit.empty()) {
+            if (state->debounceTimer) state->debounceTimer.reset();
+            engine_->dispatchRequest(ic, state);
+        }
+        return;
+    }
     engine_->selectCandidate(ic, candText_, matchedLength_);
 }
 
@@ -87,6 +108,14 @@ void GoogleIMEEngine::trimCommitted(GoogleIMEState *state) const {
     }
 }
 
+bool GoogleIMEEngine::candidatesFresh(const GoogleIMEState *state) const {
+    // A list that was never populated is not "fresh" in the sense selection
+    // paths care about (there is nothing to select from), so treat empty lists
+    // as unselectable rather than accidentally-usable.
+    if (state->candidates.empty()) return false;
+    return state->candidatesProbe == buildProbe(state);
+}
+
 void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
                                       const std::string &text,
                                       int matchedLength) {
@@ -110,6 +139,7 @@ void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
             ml = static_cast<int>(state->preedit.size());
         if (ml > 0) state->preedit.erase(0, ml);
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
     }
@@ -173,7 +203,8 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
             const auto &c = state->candidates[i];
             fcitx::Text t(c.text);
             cl->append(std::make_unique<MyCandidateWord>(
-                           std::move(t), this, c.text, c.matchedLength),
+                           std::move(t), this, c.text, c.matchedLength,
+                           state->candidatesProbe),
                        state->cursor);
         }
     }
@@ -203,14 +234,15 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
 
     // Drop stale results: either a newer edit happened (generation changed)
     // or the probe (committed context + preedit) changed since this request
-    // was issued.
+    // was issued. This is expected and frequent with the short debounce, so we
+    // don't log it — spamming stderr on every dropped result only adds I/O
+    // overhead on the exact fast-typing path we're trying to optimize.
     if (gen != state->generation || probe != buildProbe(state)) {
-        std::cerr << "GoogleIMEEngine: dropping stale result (gen=" << gen
-                  << " vs " << state->generation << ")\n";
         return;
     }
 
     state->candidates = std::move(candidates);
+    state->candidatesProbe = probe;
     state->page = 0;
     state->cursor = 0;
 
@@ -260,6 +292,7 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
         state->preedit.clear();
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         ic->inputPanel().reset();
@@ -414,6 +447,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->preedit.clear();
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
@@ -485,38 +519,52 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         }
     }
 
-    // --- Digit selection (1-9, 0): works whenever candidates exist ---
+    // --- Digit selection (1-9, 0): works whenever candidates exist AND are
+    // fresh (i.e. they were computed for the current preedit). If the list is
+    // stale (a newer keystroke changed the preedit but the new lookup hasn't
+    // returned yet), we cannot safely commit from it — the candidate's
+    // matchedLength is relative to the OLD, shorter preedit and would corrupt
+    // the current one. So if stale, cancel the debounce and force a fresh
+    // lookup immediately instead of committing a possibly-wrong candidate. ---
     if (!state->candidates.empty()) {
         const int idx = key.digitSelection();
         if (idx >= 0) {
             const int perPage = kPageSize;
             const int pageStart = state->page * perPage;
             const int global = pageStart + idx;
-            if (global < static_cast<int>(state->candidates.size())) {
+            if (candidatesFresh(state) &&
+                global < static_cast<int>(state->candidates.size())) {
                 const auto &c = state->candidates[global];
                 selectCandidate(ic, c.text, c.matchedLength);
+            } else {
+                // Stale list (or out of range): treat like Space-with-no-
+                // candidates — fire the lookup for the current preedit now.
+                if (state->debounceTimer) {
+                    state->debounceTimer.reset();
+                }
+                dispatchRequest(ic, state);
             }
             keyEvent.filterAndAccept();
             return;
         }
     }
 
-    // --- Space: commit the highlighted candidate, or - if no candidates have
-    // arrived yet - force the lookup now. This keeps Space from leaking a
-    // literal space into the client while the IME is still composing. ---
+    // --- Space: commit the highlighted candidate, or - if no (fresh)
+    // candidates have arrived yet - force the lookup now. This keeps Space from
+    // leaking a literal space into the client while the IME is still
+    // composing. ---
     if (sym == FcitxKey_space && !state->preedit.empty()) {
-        if (!state->candidates.empty()) {
-            const int perPage = kPageSize;
-            const int global = state->page * perPage + state->cursor;
-            if (global >= 0 &&
-                global < static_cast<int>(state->candidates.size())) {
-                const auto &c = state->candidates[global];
-                selectCandidate(ic, c.text, c.matchedLength);
-            }
+        const int perPage = kPageSize;
+        const int global = state->page * perPage + state->cursor;
+        if (candidatesFresh(state) && global >= 0 &&
+            global < static_cast<int>(state->candidates.size())) {
+            const auto &c = state->candidates[global];
+            selectCandidate(ic, c.text, c.matchedLength);
         } else {
-            // No candidates yet (request in flight / not fired): cancel the
-            // debounce and fire the lookup immediately. The generation guard
-            // discards any duplicate stale response.
+            // No fresh candidates (request in flight / not fired, or the visible
+            // list is stale): cancel the debounce and fire the lookup
+            // immediately. The generation guard discards any duplicate stale
+            // response.
             if (state->debounceTimer) {
                 state->debounceTimer.reset();
             }
@@ -561,14 +609,14 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     if (sym > 0x20 && sym <= 0x7e) {
         state->preedit.push_back(c);
         ++state->generation;
-        // The old candidate set was for a different query: clear it so the
-        // panel shows the updated preedit alone until the new debounced
-        // request returns.
-        state->candidates.clear();
-        state->page = 0;
-        state->cursor = 0;
-        // Show the updated preedit immediately; the candidate list will be
-        // refreshed when the debounced request returns.
+        // Intentionally do NOT clear state->candidates here: we want the old
+        // (now stale) list to stay visible as a best-effort preview while the
+        // new lookup is in flight, rather than making the panel flicker to empty
+        // on every keystroke. The generation guard in applyCandidates discards
+        // stale async results, and candidatesFresh() guards the selection paths
+        // from committing a candidate that's wrong for the current preedit.
+        // The panel re-renders immediately (so the new preedit character shows
+        // up at once); the list visually updates when the fresh response lands.
         renderPanel(ic);
         scheduleRequest(ic, state);
         keyEvent.filterAndAccept();
@@ -581,11 +629,8 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     if (sym == FcitxKey_BackSpace && !state->preedit.empty()) {
         state->preedit.pop_back();
         ++state->generation;
-        // The candidate set is now stale: clear it so the panel shows the
-        // preedit alone until the new request returns.
-        state->candidates.clear();
-        state->page = 0;
-        state->cursor = 0;
+        // Same rationale as the printable-input branch above: keep showing the
+        // old candidate list while the new lookup is in flight.
         if (state->preedit.empty()) {
             // Preedit emptied: hide the panel (but keep committed context —
             // the user might resume typing the next word of the sentence)
@@ -593,6 +638,10 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
             if (state->debounceTimer) {
                 state->debounceTimer.reset();
             }
+            state->candidates.clear();
+            state->candidatesProbe.clear();
+            state->page = 0;
+            state->cursor = 0;
             renderPanel(ic);
         } else {
             renderPanel(ic);
@@ -610,6 +659,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->preedit.clear();
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
@@ -629,6 +679,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->preedit.clear();
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
@@ -672,6 +723,7 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     state->preedit.clear();
     state->committed.clear();
     state->candidates.clear();
+    state->candidatesProbe.clear();
     state->page = 0;
     state->cursor = 0;
     state->pendingPunctuation = 0;
@@ -706,6 +758,7 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
         ++state->generation;
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
@@ -719,7 +772,7 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
     }
 
     // Composition is active: resolve it before emitting punctuation.
-    if (!state->candidates.empty()) {
+    if (candidatesFresh(state)) {
         // Prefer the first full-consumption candidate (matchedLength covers
         // the whole preedit); fall back to the top-ranked candidate.
         size_t pick = 0;
@@ -748,6 +801,7 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
         state->preedit.clear();
         state->committed.clear();
         state->candidates.clear();
+        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
