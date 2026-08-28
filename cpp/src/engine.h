@@ -83,6 +83,35 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // candidate lists.
     uint64_t generation = 0;
 
+    // Monotonic per-request serial, bumped on EVERY dispatchRequest() (not just
+    // on edits). This is stricter than `generation`: two requests can share the
+    // same generation + probe yet have different `num` (e.g. an initial num=9
+    // lookup racing a num=18 "fetch more" triggered by paging down, both for the
+    // unchanged preedit). The serial guarantees the LATER of two such requests
+    // wins — an older num=9 response can never overwrite a newer num=18 list.
+    uint64_t requestSerial = 0;
+
+    // The `num` that was requested for the currently-stored candidate list
+    // (i.e. what Google was asked to return). Google returns exactly `num`
+    // candidates when at least that many exist, and fewer when it doesn't — so
+    // `candidates.size() == candidatesNum` is the signal that more candidates
+    // MIGHT be available and a "fetch more" on page-down is worth attempting.
+    // When `candidates.size() < candidatesNum`, the last fetch was partial and
+    // there are genuinely no more candidates to page into.
+    int candidatesNum = 0;
+
+    // The page a currently in-flight "fetch more" request is meant to populate,
+    // or -1 when none is in flight. Prevents queuing redundant fetch-more
+    // requests while one is already pending for the same page.
+    int moreFetchPage = -1;
+
+    // Per-IC toggle state for paired (opening/closing) punctuation — the
+    // standard CJK behavior where pressing a quote key alternates between the
+    // opening and closing form (e.g. “ then ”, ‘ then ’, 「 then 」). Bit 0 =
+    // double quote, bit 1 = single quote, bit 2 = right-bracket. A set bit means
+    // the NEXT press of that key should emit the CLOSING form.
+    uint8_t pairedNextClosing = 0;
+
     // A pending debounce timer that will fire the next Google request. Kept
     // as a member so each new keystroke can cancel (replace) the previous
     // timer — this is the rate-limiting / debounce mechanism.
@@ -175,11 +204,15 @@ public:
 
     // Apply a freshly fetched candidate set to the given input context. Runs
     // on the main thread (posted from the worker via an async event). Drops
-    // the result if it is stale (generation / probe changed since the
-    // request was issued).
+    // the result if it is stale: the generation changed (a newer edit
+    // happened), the probe (committed context + preedit) changed, OR the
+    // requestSerial changed (a newer request — possibly with a different `num`
+    // for an unchanged preedit, e.g. a "fetch more" superseding an initial
+    // lookup — superseded this one).
     void applyCandidates(fcitx::InputContext *ic,
                          std::vector<GoogleCandidate> candidates,
-                         std::string probe, uint64_t gen);
+                         std::string probe, uint64_t gen,
+                         uint64_t serial, int num, int targetPage);
 
     // Select a candidate: commit its text, extend the committed context,
     // consume `matchedLength` bytes from the front of the preedit, and
@@ -254,7 +287,33 @@ private:
     // Fire the actual (blocking) Google request in a background worker
     // thread, then post the result back to the main event loop via a
     // thread-safe async event.
-    void dispatchRequest(fcitx::InputContext *ic, GoogleIMEState *state);
+    //
+    // `num` is how many candidates to ask Google for. For a normal keystroke
+    // lookup this is numForPage(0) (= kPageSize, the first page). For a "fetch
+    // more" triggered by paging past the available candidates it grows with the
+    // target page (numForPage(targetPage) = kPageSize * (targetPage + 1)),
+    // matching Google's own web client which re-requests the same text with a
+    // larger `num` when the user pages for more (observed in a HAR capture:
+    // num=13 then num=25 for the same query).
+    //
+    // `targetPage` is the candidate page the result should land on once it
+    // arrives: 0 for a normal keystroke lookup (the preedit changed, so we
+    // restart at the first page), or the page the user paged into for a "fetch
+    // more". applyCandidates clamps it to the last valid page if Google
+    // returned fewer candidates than requested.
+    void dispatchRequest(fcitx::InputContext *ic, GoogleIMEState *state,
+                         int num, int targetPage, bool isMore);
+
+    // Convenience for the common "re-query the current preedit from scratch"
+    // case: a normal (non-paging) lookup, first page, num = kPageSize.
+    void lookupNow(fcitx::InputContext *ic, GoogleIMEState *state) {
+        dispatchRequest(ic, state, numForPage(0), 0, false);
+    }
+
+    // Number of candidates to request from Google so that the given 0-based
+    // page is fully populated: kPageSize for page 0, 2*kPageSize for page 1,
+    // 3*kPageSize for page 2, ... (9, 18, 27, ...). This is the per-page growth
+    // the user pages through with Down/PageDown/PageUp.
 
     // Per-input-context state property factory. SimpleInputContextPropertyFactory
     // default-constructs (it does `new GoogleIMEState` per input context).
@@ -291,7 +350,12 @@ private:
     static constexpr int kMaxContextChars = 20;
 
     static constexpr char kInputCode[] = "yue-hant-t-i0-und";
-    static constexpr int kNumCandidates = 13;  // matches Google's own client
+
+    // Candidates requested for a given 0-based page: 9 for page 0, 18 for
+    // page 1, 27 for page 2, ... See dispatchRequest.
+    static constexpr int numForPage(int page) {
+        return kPageSize * (page + 1);
+    }
 };
 
 class GoogleIMEFactory : public fcitx::AddonFactory {

@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <thread>
 
@@ -22,37 +21,79 @@
 #include <fcitx-utils/macros.h>
 #include <fcitx/text.h>
 
-// Map half-width ASCII punctuation to its full-width equivalent.
-// This is what makes punctuation "fall through" the romanization buffer and
-// be typed directly as full-width, instead of getting stuck in the preedit
-// (which required pressing Enter to flush, in the old implementation).
-// Anything not in this map (digits, letters, @, #, ...) is returned as the
-// original single character unchanged, so numbers in particular are never
-// converted to full-width.
-static const std::map<char, std::string> kPunctuationMap = {
-    {',', "\xEF\xBC\x8C"},   // ，
-    {'.', "\xE3\x80\x82"},   // 。
-    {'/', "\xEF\xBC\x8F"},   // ／
-    {';', "\xEF\xBC\x9B"},   // ；
-    {':', "\xEF\xBC\x9A"},   // ：
-    {'!', "\xEF\xBC\x81"},   // ！
-    {'?', "\xEF\xBC\x9F"},   // ？
-    {'(', "\xEF\xBC\x88"},   // （
-    {')', "\xEF\xBC\x89"},   // ）
-    {'[', "\xE3\x80\x8C"},   // 「
-    {']', "\xE3\x80\x8D"},   // 」
+// Punctuation mapping for Cantonese (Traditional, Hong Kong).
+//
+// This table mirrors fcitx5's own `punc.mb.zh_HK` punctuation profile — the
+// standard ASCII→CJK punctuation mapping fcitx5 ships for the zh_HK locale —
+// so this IME produces the same full-width punctuation a user gets from
+// fcitx5's built-in Chinese engines in Hong Kong. Source:
+//   https://github.com/fcitx/fcitx5-chinese-addons/blob/master/modules/punctuation/punc.mb.zh_HK
+//
+// Each entry maps one ASCII key to its CJK equivalent. A few keys — the
+// paired quotes and corner brackets — map to TWO forms: an opening form
+// (primary) and a closing form (secondary). For those, punctuationFor()
+// alternates between the two on successive presses, which is the standard
+// CJK behavior: typing `"` twice yields “ then ”, `]` twice yields 「 then 」.
+//
+// Digits (0-9) and letters are intentionally NOT in this table: digits always
+// stay half-width (they are candidate selectors / pass-through), and letters
+// go to the romanization preedit. Punctuation not listed here (e.g. `@`, `#`)
+// passes through to the client unchanged.
+struct PunctMapping {
+    char ascii;
+    const char* primary;
+    const char* secondary;  // nullptr for non-paired punctuation
+    uint8_t bit;            // bitmask into state->pairedNextClosing (0 if not paired)
 };
 
-// Returns the full-width equivalent of a punctuation char, or `c` itself if
-// `c` is not a mapped punctuation (digits and other non-punctuation pass
-// through unchanged as half-width).
-static std::string punctuationOf(char c) {
-    auto it = kPunctuationMap.find(c);
-    if (it != kPunctuationMap.end()) return it->second;
-    return std::string(1, c);
+inline constexpr PunctMapping kPunctMappings[] = {
+    {'!',  "\xEF\xBC\x81", nullptr, 0},              // ！
+    {'"',  "\xE2\x80\x9C", "\xE2\x80\x9D", 0x01},  // “ ”
+    {'$',  "\xEF\xBC\x84", nullptr, 0},              // ＄
+    {'\'', "\xE2\x80\x98", "\xE2\x80\x99", 0x02},  // ‘ ’
+    {'(',  "\xEF\xBC\x88", nullptr, 0},              // （
+    {')',  "\xEF\xBC\x89", nullptr, 0},              // ）
+    {',',  "\xEF\xBC\x8C", nullptr, 0},              // ，
+    {'.',  "\xE3\x80\x82", nullptr, 0},              // 。
+    {'<',  "\xE3\x80\x8A", nullptr, 0},              // 《
+    {'>',  "\xE3\x80\x8B", nullptr, 0},              // 》
+    {'?',  "\xEF\xBC\x9F", nullptr, 0},              // ？
+    {'[',  "\xC2\xB7",    nullptr, 0},              // ·
+    {']',  "\xE3\x80\x8C", "\xE3\x80\x8D", 0x04},  // 「 」
+    {'\\', "\xE3\x80\x81", nullptr, 0},             // 、
+    {'^',  "\xE2\x80\xA6\xE2\x80\xA6", nullptr, 0}, // ……
+    {'_',  "\xE2\x80\x94\xE2\x80\x94", nullptr, 0}, // ——
+    {'~',  "\xEF\xBD\x9E", nullptr, 0},              // ～
+    {':',  "\xEF\xBC\x9A", nullptr, 0},              // ：
+    {';',  "\xEF\xBC\x9B", nullptr, 0},              // ；
+};
+
+static const PunctMapping* findPunct(char c) {
+    for (const auto& m : kPunctMappings) {
+        if (m.ascii == c) return &m;
+    }
+    return nullptr;
 }
 
-static bool isPunctuation(char c) { return kPunctuationMap.count(c) > 0; }
+// Returns the full-width CJK string to emit for `c`. For paired punctuation
+// (quotes / corner brackets) it alternates between the opening and closing
+// form across successive presses, toggling per-IC state — the standard CJK
+// behavior. For non-punctuation it returns the char unchanged (half-width).
+static std::string punctuationFor(char c, GoogleIMEState* state) {
+    const PunctMapping* m = findPunct(c);
+    if (!m) return std::string(1, c);
+    const char* out = m->primary;
+    if (m->secondary && state) {
+        if (state->pairedNextClosing & m->bit) {
+            out = m->secondary;            // emit closing, next is opening
+            state->pairedNextClosing &= ~m->bit;
+        } else {
+            out = m->primary;              // emit opening, next is closing
+            state->pairedNextClosing |= m->bit;
+        }
+    }
+    return out;
+}
 
 void GoogleIMEEngine::MyCandidateWord::select(
     fcitx::InputContext *ic) const {
@@ -75,7 +116,7 @@ void GoogleIMEEngine::MyCandidateWord::select(
         !engine_->candidatesFresh(state)) {
         if (state && !state->preedit.empty()) {
             if (state->debounceTimer) state->debounceTimer.reset();
-            engine_->dispatchRequest(ic, state);
+            engine_->lookupNow(ic, state);
         }
         return;
     }
@@ -227,23 +268,39 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
 
 void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
                                       std::vector<GoogleCandidate> candidates,
-                                      std::string probe, uint64_t gen) {
+                                      std::string probe, uint64_t gen,
+                                      uint64_t serial, int num, int targetPage) {
     if (!ic) return;
     auto *state = ic->propertyFor(&stateFactory_);
     if (!state) return;
 
-    // Drop stale results: either a newer edit happened (generation changed)
-    // or the probe (committed context + preedit) changed since this request
-    // was issued. This is expected and frequent with the short debounce, so we
-    // don't log it — spamming stderr on every dropped result only adds I/O
-    // overhead on the exact fast-typing path we're trying to optimize.
-    if (gen != state->generation || probe != buildProbe(state)) {
+    // Drop stale results: either a newer edit happened (generation changed),
+    // the probe (committed context + preedit) changed, OR a newer request
+    // superseded this one (serial changed — e.g. a "fetch more" with a larger
+    // num was issued for the same unchanged preedit). This is expected and
+    // frequent with the short debounce, so we don't log it — spamming stderr on
+    // every dropped result only adds I/O overhead on the exact fast-typing
+    // path we're trying to optimize.
+    if (gen != state->generation || probe != buildProbe(state) ||
+        serial != state->requestSerial) {
         return;
     }
 
     state->candidates = std::move(candidates);
     state->candidatesProbe = probe;
-    state->page = 0;
+    state->candidatesNum = num;
+    state->moreFetchPage = -1;  // this in-flight fetch (if any) is now resolved
+    // Land on the page this result was meant to populate: 0 for a normal
+    // keystroke lookup (preedit changed -> restart at first page), or the page
+    // the user paged into for a "fetch more". Clamp to the last valid page in
+    // case Google returned fewer candidates than requested (partial set -> no
+    // more pages beyond what we got).
+    const int total = static_cast<int>(state->candidates.size());
+    const int maxPage = total > 0 ? (total - 1) / kPageSize : 0;
+    int tp = targetPage;
+    if (tp < 0) tp = 0;
+    if (tp > maxPage) tp = maxPage;
+    state->page = tp;
     state->cursor = 0;
 
     // Deferred punctuation: the user typed punctuation while no candidates
@@ -253,7 +310,7 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
     // network was a beat slow (e.g. "nei," -> "你，" rather than "nei，").
     if (state->pendingPunctuation) {
         char pw = state->pendingPunctuation;
-        std::string out = punctuationOf(pw);
+        std::string out = punctuationFor(pw, state);
         state->pendingPunctuation = 0;
         std::string committedText;
         if (!state->candidates.empty()) {
@@ -325,14 +382,26 @@ void GoogleIMEEngine::scheduleRequest(fcitx::InputContext *ic,
             // Another keystroke may have arrived since this timer was armed;
             // only fire if we are still the latest request.
             if (st->generation != gen) return false;
-            dispatchRequest(ic, st);
+            lookupNow(ic, st);
             return false;  // one-shot
         });
 }
 
 void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
-                                     GoogleIMEState *state) {
+                                     GoogleIMEState *state,
+                                     int num, int targetPage, bool isMore) {
     if (!instance_) return;
+
+    // Bump the per-request serial on every dispatch. This is stricter than the
+    // generation counter: two requests can share a generation + probe yet have
+    // different `num` (an initial num=9 lookup racing a num=18 "fetch more"
+    // for the same unchanged preedit). The serial makes the LATER request win —
+    // an older num=9 response can never overwrite a newer num=18 list.
+    ++state->requestSerial;
+    // Record which page an in-flight "fetch more" is meant to populate, so a
+    // second page-down while the first is still pending doesn't queue a
+    // duplicate request. A normal (non-paging) lookup clears this.
+    state->moreFetchPage = isMore ? targetPage : -1;
 
     // Shared, heap-allocated result struct. The worker thread writes the
     // Google response into it, then calls send() on the async source (which
@@ -342,6 +411,9 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
         std::vector<GoogleCandidate> candidates;
         std::string probe;
         uint64_t gen = 0;
+        uint64_t serial = 0;
+        int num = 0;
+        int targetPage = 0;
         fcitx::TrackableObjectReference<fcitx::InputContext> icRef;
     };
     auto result = std::make_shared<AsyncResult>();
@@ -349,6 +421,9 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     // it's what applyCandidates compares against to detect stale results.
     result->probe = buildProbe(state);
     result->gen = state->generation;
+    result->serial = state->requestSerial;
+    result->num = num;
+    result->targetPage = targetPage;
     result->icRef = ic->watch();  // weak ref: safe even if the IC is destroyed
 
     auto *engine = this;
@@ -366,7 +441,9 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
             if (ic) {
                 try {
                     engine->applyCandidates(ic, result->candidates,
-                                           result->probe, result->gen);
+                                           result->probe, result->gen,
+                                           result->serial, result->num,
+                                           result->targetPage);
                 } catch (const std::exception &e) {
                     std::cerr << "GoogleIMEEngine(applyCandidates): exception: "
                               << e.what() << "\n";
@@ -394,10 +471,10 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
 
     // The HTTP GET blocks for ~100ms; do it on a worker thread so the main
     // event loop (and all of fcitx5's input handling) is never blocked.
-    std::thread worker([engine, result, raw]() {
+    std::thread worker([engine, result, raw, num]() {
         try {
             result->candidates =
-                get_candidates(result->probe, kInputCode, kNumCandidates);
+                get_candidates(result->probe, kInputCode, num);
         } catch (const std::exception &e) {
             std::cerr << "GoogleIMEEngine(worker): get_candidates exception: "
                       << e.what() << "\n";
@@ -452,13 +529,27 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->cursor = 0;
         state->pendingPunctuation = 0;
         if (!raw.empty()) ic->commitString(raw);
-        ic->commitString(punctuationOf(pending));
+        ic->commitString(punctuationFor(pending, state));
         ic->inputPanel().reset();
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
         // Fall through: the current key is now handled against fresh state.
     }
 
+    // --- Modifier-guard: pass Ctrl/Alt/Super/Hyper combos straight through to
+    // the client. Without this, Ctrl+A (whose X11 keysym is the uppercase 'A')
+    // would fall into the printable-input branch below and push a capital 'A'
+    // into the romanization preedit — which was the root cause of "ctrl and
+    // alt keys write capital letters". We must NOT consume these events: the
+    // client almost always owns them (Ctrl+S to save, Ctrl+C to copy, ...),
+    // so returning without filter() lets them reach the client untouched.
+    const fcitx::KeyStates mods = key.states();
+    const fcitx::KeyStates kModifierMask{
+        fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
+        fcitx::KeyState::Super, fcitx::KeyState::Hyper};
+    if (mods.testAny(kModifierMask)) {
+        return;
+    }
     // --- Candidate navigation (only meaningful when there are candidates) ---
     if (!state->candidates.empty() && state->cursor >= 0) {
         const int perPage = kPageSize;
@@ -491,6 +582,20 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                 } else if (state->page < totalPages - 1) {
                     state->page++;
                     state->cursor = 0;
+                } else if (candidatesFresh(state) &&
+                           state->moreFetchPage < 0 &&
+                           static_cast<int>(state->candidates.size()) ==
+                               state->candidatesNum) {
+                    // At the bottom of the last page, and the last fetch
+                    // returned a full set (Google might have more): re-request
+                    // the same preedit with a larger `num` so the next page is
+                    // populated. This mirrors Google's own web client, which
+                    // re-requests the same text with a larger `num` when the
+                    // user pages for more candidates. The result lands on
+                    // `targetPage` (page+1) when it arrives.
+                    const int targetPage = state->page + 1;
+                    dispatchRequest(ic, state, numForPage(targetPage),
+                                   targetPage, true);
                 }
                 renderPanel(ic);
                 keyEvent.filterAndAccept();
@@ -503,6 +608,15 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                 } else if (sym == FcitxKey_Page_Down &&
                            state->page < totalPages - 1) {
                     state->page++;
+                } else if (sym == FcitxKey_Page_Down && candidatesFresh(state) &&
+                           state->moreFetchPage < 0 &&
+                           static_cast<int>(state->candidates.size()) ==
+                               state->candidatesNum) {
+                    // Paging past the last available candidate: fetch more for
+                    // the next page (see FcitxKey_Down above for rationale).
+                    const int targetPage = state->page + 1;
+                    dispatchRequest(ic, state, numForPage(targetPage),
+                                   targetPage, true);
                 }
                 const int pageStart = state->page * perPage;
                 const int pageEnd =
@@ -542,7 +656,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                 if (state->debounceTimer) {
                     state->debounceTimer.reset();
                 }
-                dispatchRequest(ic, state);
+                lookupNow(ic, state);
             }
             keyEvent.filterAndAccept();
             return;
@@ -568,33 +682,46 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
             if (state->debounceTimer) {
                 state->debounceTimer.reset();
             }
-            dispatchRequest(ic, state);
+            lookupNow(ic, state);
         }
         keyEvent.filterAndAccept();
         return;
     }
 
-    // --- Punctuation: map half-width punctuation to full-width, emitted
-    // directly rather than being typed into the romanization buffer. This is
-    // what stops "," / "." etc. from getting stuck in the preedit until the
-    // user presses Enter. Numbers are intentionally NOT handled here (and not
-    // in the printable-input branch below either) so they always stay
-    // half-width, matching normal typing without the IME. ---
-    if (sym > 0x20 && sym <= 0x7e && isPunctuation(static_cast<char>(sym))) {
+    // --- Printable ASCII: split into letters (romanization), digits (tone
+    // numbers / pass-through), and symbols (everything else). Symbols are
+    // treated like punctuation: they flush any active composition and emit
+    // directly, NEVER entering the romanization preedit — which is what stops
+    // "," / "." etc. from getting stuck in the buffer until the user presses
+    // Enter. Mapped symbols become full-width CJK punctuation; symbols not in
+    // the zh_HK table (e.g. `@`, `#`, `=`, `+`) emit as their half-width ASCII
+    // self. This mirrors fcitx5's own zh_HK punctuation handling and avoids the
+    // old regression where an unmapped symbol like `/` would get stuck in the
+    // preedit. ---
+    char c = static_cast<char>(sym);
+    // Jyutping romanization is all lowercase. Normalize any uppercase ASCII
+    // letter (whether from Shift or CapsLock) down to lowercase before it
+    // enters the preedit, so neither can poison the lookup Google receives.
+    if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
+    const bool asciiPrintable = sym > 0x20 && sym <= 0x7e;
+    const bool isDigit = (sym >= '0' && sym <= '9');
+    const bool isLetter =
+        (sym >= 'A' && sym <= 'Z') || (sym >= 'a' && sym <= 'z');
+    const bool composing = !state->preedit.empty() || !state->candidates.empty() || state->pendingPunctuation;
+
+    if (asciiPrintable && !isDigit && !isLetter) {
+        // Symbol: flush the composition (if any) and emit the symbol directly,
+        // full-width if the zh_HK table maps it, half-width otherwise.
         commitPunctuation(ic, state, static_cast<char>(sym));
         keyEvent.filterAndAccept();
         return;
     }
 
-    // --- Printable input: append to the preedit ---
     // Digits ('0'-'9') and tone-number digits are part of jyutping romanization
     // and must reach the preedit while composing (e.g. "si3" with the tone
     // number). When there's no active composition, digits should NOT be
     // buffered or sent to Google — they should pass through to the client as
     // ordinary ASCII digits (half-width), exactly as if the IME were off.
-    const char c = static_cast<char>(sym);
-    const bool isDigit = (sym >= '0' && sym <= '9');
-    const bool composing = !state->preedit.empty() || !state->candidates.empty() || state->pendingPunctuation;
     if (isDigit && !composing) {
         // Pass digits straight through, half-width, no buffering. The
         // client now owns this digit directly, so our internal committed
@@ -606,7 +733,8 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         }
         return;
     }
-    if (sym > 0x20 && sym <= 0x7e) {
+    if (asciiPrintable) {
+        // Letters (and tone digits while composing) go to the preedit.
         state->preedit.push_back(c);
         ++state->generation;
         // Intentionally do NOT clear state->candidates here: we want the old
@@ -724,6 +852,8 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     state->committed.clear();
     state->candidates.clear();
     state->candidatesProbe.clear();
+    state->candidatesNum = 0;
+    state->moreFetchPage = -1;
     state->page = 0;
     state->cursor = 0;
     state->pendingPunctuation = 0;
@@ -746,7 +876,14 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
 void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
                                         GoogleIMEState *state,
                                         char halfWidth) {
-    std::string out = punctuationOf(halfWidth);
+    // NOTE: punctuationFor() toggles the per-IC paired-quote state as a side
+    // effect of producing the opening/closing form. It must therefore be called
+    // EXACTLY ONCE, at the moment the punctuation is actually emitted — never
+    // speculatively up front. The deferred path below does NOT emit here (the
+    // async response in applyCandidates emits later), so it must not toggle
+    // either; otherwise the toggle would run twice (once here, discarded, and
+    // once in applyCandidates) and the emitted quote would flip to the wrong
+    // form. Each emit path below computes `out` for itself at emit time.
 
     if (state->preedit.empty()) {
         // No composition active: emit the punctuation directly. Punctuation
@@ -754,6 +891,7 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
         // committed prediction context here (below) rather than keep it
         // across the punctuation — the next composition should start a fresh
         // context, not continue predicting off the pre-punctuation sentence.
+        const std::string out = punctuationFor(halfWidth, state);
         ic->commitString(out);
         ++state->generation;
         state->committed.clear();
@@ -797,6 +935,7 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
         if (state->debounceTimer) state->debounceTimer.reset();
         ic->commitString(picked.text);
         if (!remainder.empty()) ic->commitString(remainder);
+        const std::string out = punctuationFor(halfWidth, state);
         ic->commitString(out);
         state->preedit.clear();
         state->committed.clear();
@@ -814,12 +953,14 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
     // Candidates are not available yet (request in flight or not yet fired).
     // Defer: cancel any pending debounce and fire the lookup immediately so
     // the deferred-resolution path in applyCandidates handles it as soon as
-    // results arrive.
+    // results arrive. We do NOT call punctuationFor() here: the toggle must
+    // happen exactly once, at emit time, which is inside applyCandidates when
+    // the deferred punctuation is finally resolved and emitted.
     state->pendingPunctuation = halfWidth;
     if (state->debounceTimer) {
         state->debounceTimer.reset();
     }
-    dispatchRequest(ic, state);
+    lookupNow(ic, state);
 }
 
 GoogleIMEEngine::GoogleIMEEngine(fcitx::Instance *instance) : instance_(instance) {
