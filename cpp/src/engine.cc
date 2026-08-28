@@ -14,6 +14,90 @@
 #include <fcitx/inputpanel.h>
 #include <fcitx/text.h>
 
+// Google Input Tools returns candidates as JSON-style strings in which every
+// non-ASCII character is escaped as a literal "\uXXXX" sequence (e.g. the
+// Chinese character 从 arrives as the six ASCII bytes '\','u','4','e','c','e'
+// instead of its 3-byte UTF-8 encoding). fcitx::Text(std::string) treats its
+// argument as already-valid UTF-8, so without this decoding the candidate box
+// shows the raw "\u4ece" text and selecting it commits that same escape text.
+// This converts JSON \uXXXX escapes (including UTF-16 surrogate pairs) and the
+// common JSON short escapes into real UTF-8 bytes.
+static std::string unescapeJsonUnicode(const std::string &in) {
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    auto appendUtf8 = [](std::string &out, uint32_t cp) {
+        if (cp <= 0x7F) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    };
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] != '\\') {
+            out.push_back(in[i]);
+            continue;
+        }
+        if (i + 1 >= in.size()) {
+            out.push_back('\\');
+            break;
+        }
+        char e = in[i + 1];
+        if (e == 'u' && i + 5 < in.size()) {
+            int d0 = hex(in[i+2]), d1 = hex(in[i+3]), d2 = hex(in[i+4]), d3 = hex(in[i+5]);
+            if (d0 < 0 || d1 < 0 || d2 < 0 || d3 < 0) {
+                out.push_back('\\');
+                continue;
+            }
+            uint32_t cp = (d0 << 12) | (d1 << 8) | (d2 << 4) | d3;
+            // UTF-16 surrogate pair: \uD800-\uDBFF followed by \uDC00-\uDFFF
+            if (cp >= 0xD800 && cp <= 0xDBFF && i + 11 < in.size() &&
+                in[i+6] == '\\' && in[i+7] == 'u') {
+                int e0 = hex(in[i+8]), e1 = hex(in[i+9]), e2 = hex(in[i+10]), e3 = hex(in[i+11]);
+                if (e0 >= 0 && e1 >= 0 && e2 >= 0 && e3 >= 0) {
+                    uint32_t lo = (e0 << 12) | (e1 << 8) | (e2 << 4) | e3;
+                    if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                        appendUtf8(out, cp);
+                        i += 11;
+                        continue;
+                    }
+                }
+            }
+            appendUtf8(out, cp);
+            i += 5;
+            continue;
+        }
+        switch (e) {
+            case '"': out.push_back('"'); i += 1; break;
+            case '\\': out.push_back('\\'); i += 1; break;
+            case '/': out.push_back('/'); i += 1; break;
+            case 'n': out.push_back('\n'); i += 1; break;
+            case 'r': out.push_back('\r'); i += 1; break;
+            case 't': out.push_back('\t'); i += 1; break;
+            case 'b': out.push_back('\b'); i += 1; break;
+            case 'f': out.push_back('\f'); i += 1; break;
+            default: out.push_back('\\'); break;
+        }
+    }
+    return out;
+}
+
 // The candidate text is stored in the fcitx::CandidateWord base class (via the
 // base constructor). CandidateWord::text() is non-virtual, so the UI and
 // CommonCandidateList obtain the displayed string through the base text() --
@@ -61,8 +145,9 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
     // was throwing "invalid global index" (cursor -1) and aborting fcitx5.
     auto tmp = std::make_unique<GoogleIMECandidateList>();
     for (size_t i = 0; i < candidates.size(); ++i) {
-        fcitx::Text t(candidates[i]);
-        std::cerr << "  candidate[" << i << "]=" << t.toString() << "" << std::endl;
+        std::string text = unescapeJsonUnicode(candidates[i]);
+        std::cerr << "  candidate[" << i << "]=" << text << "" << std::endl;
+        fcitx::Text t(std::move(text));
         tmp->append(std::make_unique<MyCandidateWord>(std::move(t), this));
     }
     std::cerr << "GoogleIMEEngine: appended " << tmp->size() << " candidates" << std::endl;
@@ -99,7 +184,8 @@ void GoogleIMEEngine::updateUI(fcitx::InputContext* ic,
         std::cerr << "GoogleIMEEngine: TEST_HOOK forcing server-side preedit + candidate UI" << std::endl;
         auto testList = std::make_unique<GoogleIMECandidateList>();
         for (size_t i = 0; i < candidates.size(); ++i) {
-            testList->append(std::make_unique<MyCandidateWord>(fcitx::Text(candidates[i]), this));
+            std::string text = unescapeJsonUnicode(candidates[i]);
+            testList->append(std::make_unique<MyCandidateWord>(fcitx::Text(std::move(text)), this));
         }
         panel.setPreedit(fcitx::Text(probe));
         panel.setCandidateList(std::move(testList));
