@@ -1,2 +1,2 @@
-cpp/build
-daemon/__pycache__
+build
+rpmbuild

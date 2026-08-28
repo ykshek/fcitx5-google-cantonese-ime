@@ -45,11 +45,26 @@ The Cantonese input code is `yue-hant-t-i0-und` (Traditional Chinese, Cantonese)
 
 There is no daemon to run anymore. Build the plugin, install it, then enable the input method in fcitx5.
 
+### Fedora (RPM)
+
+Prebuilt RPMs are published on the GitHub Releases page (and via COPR). Install
+the package, then restart fcitx5:
+
+```bash
+# Download the RPM from the latest release, then:
+sudo dnf install fcitx5-google-cantonese-ime-*.rpm
+
+# Restart fcitx5 and enable "Google IME" (粵) in your input method list
+fcitx5 -r -d
+```
+
+### Build from source
+
 ```bash
 # 1. Build (needs fcitx5 dev headers, libcurl, nlohmann/json)
 just build-local
 
-# 2. Install the .so + metadata
+# 2. Install the .so + metadata into /usr
 just install
 
 # 3. Restart fcitx5 and enable "Google IME" (粵) in your input method list
@@ -72,22 +87,23 @@ curl "https://inputtools.google.com/request?text=nei&itc=yue-hant-t-i0-und&num=8
 just build-container   # build the Fedora dev container image
 just build             # build the C++ plugin inside the container
 just build-local       # build locally (host must have the dev deps)
-just install           # copy the .so + metadata into /usr/local/.../fcitx5
+just install           # install the .so + metadata into /usr
+just rpm               # build the RPM locally inside the container
 ```
 
 ### Build dependencies
 
-- `fcitx5-devel` (and `fcitx5-qt-devel`, `extra-cmake-modules`)
+- `fcitx5-devel` (and `extra-cmake-modules`)
 - `libcurl-devel` (with SSL/TLS support — default on most distros)
 - `nlohmann/json` — provided by the system `json-devel` (Fedora) / `nlohmann-json3-dev` (Debian). If the system package is missing, CMake's `FetchContent` will fetch it from GitHub at configure time (needs `git` + network during `cmake`).
 
 ## Installation
 
-Very rudimentary for now, use `just install`, which copies the relevant files to the correct places. However, note that you may also have to either:
+`just install` installs exactly three files into `/usr`:
 
-- `sudo cp /usr/local/lib/fcitx5/libfcitx5-google-ime.so /usr/lib64/fcitx5/libfcitx5-google-ime.so`, or
-
-as otherwise `fcitx5` may not recognize the `.so` in `/usr/local`.
+- `/usr/lib64/fcitx5/libfcitx5-google-ime.so`
+- `/usr/share/fcitx5/addon/google-ime.conf`
+- `/usr/share/fcitx5/inputmethod/google-ime.conf`
 
 After installing, restart fcitx5 (`fcitx5 -r -d`) and add the "Google IME" input method in the fcitx5 configuration tool.
 

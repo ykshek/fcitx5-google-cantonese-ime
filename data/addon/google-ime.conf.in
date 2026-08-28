@@ -1,7 +1,7 @@
 [Addon]
-Name=google-ime
+Name=Google IME
 Category=InputMethod
-Version=0.1
+Version=@PROJECT_VERSION@
 Library=libfcitx5-google-ime
 Type=SharedLibrary
 OnDemand=True

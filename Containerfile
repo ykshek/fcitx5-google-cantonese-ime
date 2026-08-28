@@ -1,7 +1,10 @@
-# Containerfile to build the cpp plugin across distros (Fedora base)
+# Containerfile to build the fcitx5 plugin and RPM package across distros (Fedora base)
 FROM quay.io/fedora/fedora:latest
 
-# Install build deps; adjust packages per distro as needed
+LABEL description="Development and RPM build environment for fcitx5-google-cantonese-ime"
+LABEL maintainer="Alex Shek <hms.starryfish@gmail.com>"
+
+# Install build deps and RPM tooling
 RUN dnf5 -y update && \
     dnf5 -y install \
         cmake \
@@ -10,21 +13,22 @@ RUN dnf5 -y update && \
         git \
         libcurl-devel \
         json-devel \
-        pkgconfig \
+        pkgconf-pkg-config \
         fcitx5-devel \
-        fcitx5-qt-devel \
         extra-cmake-modules \
+        rpm-build \
+        rpmdevtools \
+        gawk \
     && dnf5 clean all
 
-
 # Set up workspace directory
-RUN mkdir -p cpp/build
-WORKDIR /work
+RUN mkdir -p /workspace
+WORKDIR /workspace
 
 # Set environment variables for development
 ENV CMAKE_BUILD_TYPE=Release
-ENV CMAKE_INSTALL_PREFIX=/usr/local
+ENV CMAKE_INSTALL_PREFIX=/usr
 ENV QT_QPA_PLATFORM=offscreen
 
-# Default to an interactive shell; use podman run to execute build commands
+# Default to an interactive shell; use podman/docker run to execute build commands
 CMD ["/bin/bash"]

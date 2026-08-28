@@ -1,0 +1,152 @@
+name: Build and Release RPM
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-builder
+
+jobs:
+  build-rpm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up variables
+      id: vars
+      run: |
+        # Extract version from tag (remove 'v' prefix)
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+        # Generate release name
+        echo "release_name=fcitx5-google-cantonese-ime $VERSION" >> $GITHUB_OUTPUT
+
+        # Set container image tag
+        echo "image_tag=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build development container
+      run: |
+        docker build -t ${{ steps.vars.outputs.image_tag }} -f Containerfile .
+        docker push ${{ steps.vars.outputs.image_tag }}
+
+    - name: Create RPM build structure
+      run: |
+        mkdir -p rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
+
+    - name: Create source tarball
+      run: |
+        git archive --format=tar.gz --prefix=v${{ steps.vars.outputs.version }}/ HEAD > rpmbuild/SOURCES/v${{ steps.vars.outputs.version }}.tar.gz
+
+    - name: Copy spec file
+      run: |
+        cp fcitx5-google-cantonese-ime.spec rpmbuild/SPECS/
+
+    - name: Build RPM
+      run: |
+        docker run --rm \
+          --volume "$(pwd):/workspace" \
+          --workdir /workspace \
+          ${{ steps.vars.outputs.image_tag }} \
+          bash -c "
+            set -euo pipefail
+
+            # Build the RPM
+            rpmbuild --define '_topdir /workspace/rpmbuild' \
+                     --define 'version ${{ steps.vars.outputs.version }}' \
+                     -ba rpmbuild/SPECS/fcitx5-google-cantonese-ime.spec
+          "
+
+    - name: List built packages
+      run: |
+        echo "Built RPM packages:"
+        find rpmbuild/RPMS -name "*.rpm" -type f
+        find rpmbuild/SRPMS -name "*.rpm" -type f
+
+    - name: Prepare release artifacts
+      run: |
+        mkdir -p release-artifacts
+
+        # Copy RPM packages
+        find rpmbuild/RPMS -name "*.rpm" -type f -exec cp {} release-artifacts/ \;
+        find rpmbuild/SRPMS -name "*.rpm" -type f -exec cp {} release-artifacts/ \;
+
+        # Create checksums
+        cd release-artifacts
+        sha256sum *.rpm > SHA256SUMS
+        cd ..
+
+        # List artifacts
+        echo "Release artifacts:"
+        ls -la release-artifacts/
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << EOF
+        fcitx5 Cantonese input method backed by Google Input Tools.
+
+        A self-contained fcitx5 engine that queries Google Input Tools over HTTPS.
+        No separate daemon, no Python runtime.
+
+        ## Installation (Fedora 44)
+
+        Install from COPR or download the RPM below and install it:
+
+        \`\`\`bash
+        sudo dnf install fcitx5-google-cantonese-ime-*.rpm
+        \`\`\`
+
+        After installing, restart fcitx5 and add the "Google IME" (粵) input
+        method in the fcitx5 configuration tool:
+
+        \`\`\`bash
+        fcitx5 -r -d
+        \`\`\`
+
+        ## Verification
+
+        Verify the integrity of downloaded files:
+
+        \`\`\`bash
+        sha256sum -c SHA256SUMS
+        \`\`\`
+        EOF
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+      with:
+        tag_name: ${{ steps.vars.outputs.tag }}
+        name: ${{ steps.vars.outputs.release_name }}
+        body_path: release_notes.md
+        files: |
+          release-artifacts/*.rpm
+          release-artifacts/SHA256SUMS
+        draft: false
+        prerelease: false
+
+    - name: Update latest tag
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git tag -f latest
+        git push origin latest --force
