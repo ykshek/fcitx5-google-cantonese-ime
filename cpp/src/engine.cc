@@ -158,7 +158,7 @@ bool GoogleIMEEngine::candidatesFresh(const GoogleIMEState *state) const {
 }
 
 void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
-                                      const std::string &text,
+                                      std::string text,
                                       int matchedLength) {
     auto *state = ic ? ic->propertyFor(&stateFactory_) : nullptr;
     if (state) {

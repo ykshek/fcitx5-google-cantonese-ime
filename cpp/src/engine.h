@@ -218,7 +218,13 @@ public:
     // consume `matchedLength` bytes from the front of the preedit, and
     // (if any preedit remains) re-query the remainder — this is what makes
     // word-by-word / partial candidate selection work.
-    void selectCandidate(fcitx::InputContext *ic, const std::string &text,
+    //
+    // `text` is taken BY VALUE deliberately: the digit/space selection paths
+    // call this with a reference into state->candidates[i].text, and this
+    // method clears state->candidates before reaching commitString(text).
+    // A const ref would dangle after that clear() (use-after-free). The copy
+    // makes `text` independent of state->candidates.
+    void selectCandidate(fcitx::InputContext *ic, std::string text,
                          int matchedLength);
 
 private:
