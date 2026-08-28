@@ -78,7 +78,6 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
     return out;
 }
 
-#ifdef HAVE_FCITX5
 // The real fcitx5 integration goes here. Include fcitx5 headers and implement
 // the engine class that listens for composition updates, queries the daemon,
 // and displays candidates using fcitx5's candidate UI APIs.
@@ -101,13 +100,11 @@ std::vector<std::string> query_daemon(const std::string& text, const std::string
 // different packages, implementers should reference a known engine (e.g.
 // fcitx5-mozc or fcitx5-skk) for exact API calls.
 
-#endif // HAVE_FCITX5
-
 // For local testing without fcitx5 dev headers, provide a small CLI demo
 // that shows how candidates are fetched and displayed.
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "test") {
-        auto cands = query_daemon("nei", "zh-t-i0-pinyin", 8);
+        auto cands = query_daemon("nei", "yue-hant-t-i0-und", 8);
         std::cerr << "Candidates:\n";
         for (size_t i = 0; i < cands.size(); ++i) {
             std::cerr << i << ": " << cands[i] << "\n";

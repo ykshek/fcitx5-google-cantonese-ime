@@ -10,7 +10,7 @@ import requests
 GOOGLE_INPUTTOOLS_URL = "https://inputtools.google.com/request"
 
 
-def get_suggestions(text: str, itc: str = "zh-t-i0-pinyin", num: int = 8):
+def get_suggestions(text: str, itc: str = "yue-hant-t-i0-und", num: int = 8):
     """Query Google Input Tools and return a list of candidate strings.
 
     Args:

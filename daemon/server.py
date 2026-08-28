@@ -13,7 +13,7 @@ def suggest():
     q = request.args.get("q", "")
     if not q:
         return jsonify({"error": "missing q"}), 400
-    itc = request.args.get("itc", "zh-t-i0-pinyin")
+    itc = request.args.get("itc", "yue-hant-t-i0-und")
     try:
         num = int(request.args.get("num", 8))
     except Exception:

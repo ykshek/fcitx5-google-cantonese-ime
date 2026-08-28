@@ -297,7 +297,7 @@ void GoogleIMEEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent
 
         std::thread worker([probe = std::move(probe), mySeq, ic, this]() mutable {
             try {
-                auto candidates = query_daemon(probe, "zh-t-i0-pinyin", 8);
+                auto candidates = query_daemon(probe, "yue-hant-t-i0-und", 8);
                 std::cerr << "GoogleIMEEngine(worker): daemon returned " << candidates.size() << " candidates\n";
 
                 // Use the Instance pointer injected by factory. Fallback to
