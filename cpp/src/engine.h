@@ -18,36 +18,50 @@
 #include <utility>
 #include <vector>
 
+#include "daemon_client.h"  // GoogleCandidate
+
 // Number of candidates shown per page in the candidate panel.
 inline constexpr int kPageSize = 9;
 
 // Per-InputContext composing state. This is the single source of truth for
-// everything the engine renders: the raw query buffer (which feeds the
-// preedit), the full candidate set for the current query, the current page /
-// cursor within that page, and a monotonically increasing "generation"
-// counter used to discard stale async Google responses.
+// everything the engine renders: the preedit (raw romanized buffer still
+// being typed), the Chinese context already committed by this IME (used only
+// to help Google's prediction, never shown), the full candidate set for the
+// current query, the current page / cursor within that page, and a
+// monotonically increasing "generation" counter used to discard stale async
+// Google responses.
 //
 // Storing this per input context (via fcitx5's InputContextProperty) fixes a
 // latent bug in the previous design, which kept a single `buffer_` member on
 // the (singleton) engine shared across every input context — so switching focus
 // between two text fields would corrupt the composition state.
 struct GoogleIMEState : public fcitx::InputContextProperty {
-    // Raw romanized input typed by the user (latin letters). This is the
-    // source of truth for the preedit: the preedit is always rebuilt from
-    // `buffer` on every render, never derived from the displayed text.
-    std::string buffer;
+    // Current latin (jyutping) preedit being typed. This is the source of
+    // truth for the preedit: it is always rebuilt from `preedit` on every
+    // render, never derived from the displayed text.
+    std::string preedit;
 
-    // Full candidate list returned by Google for the current `buffer`. The
-    // panel renders a kPageSize-wide window into this vector starting at
+    // Chinese text already committed by this IME earlier in the current
+    // sentence (i.e. by a previous candidate selection), used only as
+    // prediction context sent to Google — see buildProbe(). Kept as a sliding
+    // window of at most kMaxContextChars codepoints, matching what Google's
+    // own web client does. Reset whenever composition ends (Enter/Escape/
+    // punctuation-flush/focus change) since at that point there's no more
+    // "sentence" for Google to continue predicting from.
+    std::string committed;
+
+    // Full candidate list returned by Google for the current query, together
+    // with how many bytes of `preedit` (from the front) each one consumes.
+    // The panel renders a kPageSize-wide window into this vector starting at
     // `page * kPageSize`.
-    std::vector<std::string> candidates;
+    std::vector<GoogleCandidate> candidates;
 
     // Current candidate page (0-based) and the highlighted candidate index
     // within the current page (-1 = none highlighted).
     int page = 0;
     int cursor = 0;
 
-    // Monotonic counter bumped on every buffer edit. An async Google response
+    // Monotonic counter bumped on every edit. An async Google response
     // carries the generation it was issued for; if it no longer matches the
     // current generation when it arrives, it is discarded. This is what makes
     // fast typing safe: stale in-flight responses can never overwrite newer
@@ -58,6 +72,13 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // as a member so each new keystroke can cancel (replace) the previous
     // timer — this is the rate-limiting / debounce mechanism.
     std::unique_ptr<fcitx::EventSourceTime> debounceTimer;
+
+    // Set when the user types punctuation while a lookup is still in flight
+    // (no candidates yet to resolve against). We defer emitting the
+    // full-width punctuation until the in-flight response arrives (or fails),
+    // to avoid mis-committing raw preedit just because the network was a beat
+    // slow. 0 = nothing pending.
+    char pendingPunctuation = 0;
 };
 
 // A minimal CandidateList that owns only the candidates for the CURRENT page.
@@ -139,29 +160,59 @@ public:
 
     // Apply a freshly fetched candidate set to the given input context. Runs
     // on the main thread (posted from the worker via an async event). Drops
-    // the result if it is stale (generation / buffer changed since the
+    // the result if it is stale (generation / probe changed since the
     // request was issued).
     void applyCandidates(fcitx::InputContext *ic,
-                         std::vector<std::string> candidates,
+                         std::vector<GoogleCandidate> candidates,
                          std::string probe, uint64_t gen);
 
-    // Commit a chosen candidate and reset composition state for `ic`.
-    void commitCandidate(fcitx::InputContext *ic, const std::string &text);
+    // Select a candidate: commit its text, extend the committed context,
+    // consume `matchedLength` bytes from the front of the preedit, and
+    // (if any preedit remains) re-query the remainder — this is what makes
+    // word-by-word / partial candidate selection work.
+    void selectCandidate(fcitx::InputContext *ic, const std::string &text,
+                         int matchedLength);
 
 private:
     // Candidate word. The display text MUST be handed to the
     // fcitx::CandidateWord base constructor: CandidateWord::text() is
     // non-virtual and returns exactly that stored text, and the UI reads the
-    // candidate text through the base class.
+    // candidate text through the base class. We additionally stash the raw
+    // candidate text + matchedLength (display text may differ once we add
+    // annotations later, and matchedLength is never part of the display).
     class MyCandidateWord : public fcitx::CandidateWord {
     public:
-        MyCandidateWord(fcitx::Text text, GoogleIMEEngine *engine)
-            : fcitx::CandidateWord(std::move(text)), engine_(engine) {}
+        MyCandidateWord(fcitx::Text text, GoogleIMEEngine *engine,
+                        std::string candText, int matchedLength)
+            : fcitx::CandidateWord(std::move(text)), engine_(engine),
+              candText_(std::move(candText)), matchedLength_(matchedLength) {}
         void select(fcitx::InputContext *ic) const override;
 
     private:
         GoogleIMEEngine *engine_ = nullptr;
+        std::string candText_;
+        int matchedLength_ = 0;
     };
+
+    // Build the probe string sent to Google: just the preedit when there is
+    // no committed context yet, otherwise Google's own "|<committed>,<preedit>"
+    // format (leading pipe, comma-separated), which is what lets Google use
+    // prior composed text as prediction context without treating it as part
+    // of the query to be converted.
+    std::string buildProbe(const GoogleIMEState *state) const;
+
+    // Trim `committed` down to the last kMaxContextChars UTF-8 codepoints,
+    // matching the sliding window Google's own client uses.
+    void trimCommitted(GoogleIMEState *state) const;
+
+    // Emit one full-width punctuation character (see kPunctuationMap in
+    // engine.cc). If there is an active composition, first resolves it: picks
+    // the best full-consumption candidate if one is available, otherwise
+    // commits the raw preedit. If candidates are still in flight, defers via
+    // state->pendingPunctuation and resolves once they arrive (see
+    // applyCandidates).
+    void commitPunctuation(fcitx::InputContext *ic, GoogleIMEState *state,
+                           char halfWidth);
 
     // Schedule (or reschedule) the debounced Google request for `ic`. Each
     // call cancels any previous pending timer, so rapid keystrokes coalesce
@@ -186,13 +237,29 @@ private:
     std::vector<std::unique_ptr<fcitx::EventSource>> pendingEvents_;
     std::mutex pendingEventMutex_;
 
-    // Debounce window (ms). Mirrors the behavior of the official Google Input
-    // Tools "try" page, which coalesces rapid keystrokes client-side rather
-    // than firing one network request per key. Google's public endpoint
-    // returns no rate-limit headers and does not return 429 for normal use,
-    // so this debounce (plus the generation guard that discards stale
-    // responses) is the right rate-limiting measure.
-    static constexpr int kDebounceMs = 150;
+    // Debounce window (ms). A HAR capture of the official Google Input Tools
+    // "try" page shows it issues one network request per keystroke with no
+    // meaningful client-side coalescing (successive requests ~50-120ms apart
+    // as the user types normally) — so a debounce anywhere near the previous
+    // 150ms is far more conservative than the real product. We lower it to
+    // 15ms: this still coalesces genuinely-simultaneous events (e.g. IME
+    // engines that synthesize multiple key events per physical keystroke)
+    // while firing a request on effectively every real keystroke, matching
+    // observed Google behavior. Google's public endpoint returns no
+    // rate-limit headers and does not return 429 for normal use, so this
+    // debounce (plus the generation guard that discards stale responses) is
+    // still the right rate-limiting measure.
+    static constexpr int kDebounceMs = 15;
+
+    // Google's own web client caps the committed-context it sends at 20
+    // Unicode codepoints (confirmed from a HAR capture: the `committed`
+    // portion of the `text` query param never exceeds 20 codepoints, sliding
+    // forward and dropping older characters as composition continues). We
+    // mirror that cap.
+    static constexpr int kMaxContextChars = 20;
+
+    static constexpr char kInputCode[] = "yue-hant-t-i0-und";
+    static constexpr int kNumCandidates = 13;  // matches Google's own client
 };
 
 class GoogleIMEFactory : public fcitx::AddonFactory {

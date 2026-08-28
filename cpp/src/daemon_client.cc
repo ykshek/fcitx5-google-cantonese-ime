@@ -35,6 +35,8 @@ size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
 // Build the request URL with proper URL-encoding for the query parameters.
 // Note: Google's endpoint expects `text=` (the old daemon accepted `q=` and
 // translated it to `text` internally); we pass `text` directly here.
+// We also emit the small set of context params the official Google Input
+// Tools web client sends (cp/cs/ie/oe/app) for closest parity with the site.
 std::string build_url(CURL* curl, const std::string& text,
                      const std::string& itc, int num) {
     char* esc_text = curl_easy_escape(curl, text.c_str(), 0);
@@ -42,16 +44,17 @@ std::string build_url(CURL* curl, const std::string& text,
     std::string url = std::string(kGoogleInputToolsUrl) + "?text=" +
                       (esc_text ? esc_text : "") +
                       "&itc=" + (esc_itc ? esc_itc : "") +
-                      "&num=" + std::to_string(num);
+                      "&num=" + std::to_string(num) +
+                      "&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage";
     if (esc_text) curl_free(esc_text);
     if (esc_itc) curl_free(esc_itc);
     return url;
 }
 }  // namespace
 
-std::vector<std::string> get_candidates(const std::string& text,
-                                        const std::string& itc, int num) {
-    std::vector<std::string> out;
+std::vector<GoogleCandidate> get_candidates(const std::string& text,
+                                            const std::string& itc, int num) {
+    std::vector<GoogleCandidate> out;
     if (text.empty()) return out;
 
     ensure_curl_global_init();
@@ -96,16 +99,16 @@ std::vector<std::string> get_candidates(const std::string& text,
     }
 
     // Google Input Tools response shape:
-    //   ["SUCCESS", [["<original_text>", ["cand1", "cand2", ...], [], {...}]]]
+    //   ["SUCCESS", [["<echoed preedit>", ["cand1", "cand2", ...], [], {"matched_length":[...], "annotation":[...], ...}]]]
     //
     // nlohmann::json decodes \uXXXX escapes (and UTF-16 surrogate pairs) into
     // real UTF-8 for us, so the candidate strings returned here are already
     // valid UTF-8 -- no manual unescaping is needed in the engine.
     //
-    // We parse strictly: require data[0] == "SUCCESS" and data[1][0][1] to be
-    // an array. We deliberately do NOT fall back to scanning every string in
-    // the JSON, since that would surface junk like "SUCCESS" or the original
-    // query as candidates in the IME panel.
+    // data[1][0][0] echoes back the preedit segment that matched_length is
+    // relative to (Google strips any committed context we prefixed). When the
+    // optional "matched_length" array is absent, each candidate is assumed to
+    // consume the whole echoed preedit (i.e. a full match).
     try {
         json data = json::parse(response);
         if (!data.is_array() || data.size() < 2) return out;
@@ -117,10 +120,38 @@ std::vector<std::string> get_candidates(const std::string& text,
         if (!results.is_array() || results.empty()) return out;
         const auto& first = results[0];
         if (!first.is_array() || first.size() < 2) return out;
+
+        // Echoed preedit segment (latin bytes == codepoints). Falls back to
+        // 1 so a missing matched_length can never yield 0 (always in [1, N]).
+        int defaultLen = 1;
+        if (first[0].is_string()) {
+            int n = static_cast<int>(first[0].get<std::string>().size());
+            if (n > defaultLen) defaultLen = n;
+        }
+
+        // Optional per-candidate matched_length array.
+        std::vector<int> matchedLengths;
+        if (first.size() >= 4 && first[3].is_object() &&
+            first[3].contains("matched_length") &&
+            first[3]["matched_length"].is_array()) {
+            for (const auto& m : first[3]["matched_length"]) {
+                int v = defaultLen;
+                if (m.is_number_integer()) v = m.get<int>();
+                if (v < 1) v = 1;
+                if (v > defaultLen) v = defaultLen;
+                matchedLengths.push_back(v);
+            }
+        }
+
         const auto& cands = first[1];
         if (!cands.is_array()) return out;
-        for (const auto& c : cands) {
-            if (c.is_string()) out.push_back(c.get<std::string>());
+        for (size_t i = 0; i < cands.size(); ++i) {
+            if (!cands[i].is_string()) continue;
+            GoogleCandidate c;
+            c.text = cands[i].get<std::string>();
+            c.matchedLength =
+                (i < matchedLengths.size()) ? matchedLengths[i] : defaultLen;
+            out.push_back(std::move(c));
         }
     } catch (const std::exception& e) {
         std::cerr << "get_candidates: JSON parse error: " << e.what() << "\n";

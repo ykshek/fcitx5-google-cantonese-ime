@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <thread>
 
@@ -21,35 +22,112 @@
 #include <fcitx-utils/macros.h>
 #include <fcitx/text.h>
 
-// Google Input Tools input code for Cantonese, Traditional.
-static constexpr char kInputCode[] = "yue-hant-t-i0-und";
-static constexpr int kNumCandidates = 18;  // fetch a page or two at once
+// Map half-width ASCII punctuation to its full-width equivalent.
+// This is what makes punctuation "fall through" the romanization buffer and
+// be typed directly as full-width, instead of getting stuck in the preedit
+// (which required pressing Enter to flush, in the old implementation).
+// Anything not in this map (digits, letters, @, #, ...) is returned as the
+// original single character unchanged, so numbers in particular are never
+// converted to full-width.
+static const std::map<char, std::string> kPunctuationMap = {
+    {',', "\xEF\xBC\x8C"},   // ，
+    {'.', "\xE3\x80\x82"},   // 。
+    {'/', "\xEF\xBC\x8F"},   // ／
+    {';', "\xEF\xBC\x9B"},   // ；
+    {':', "\xEF\xBC\x9A"},   // ：
+    {'!', "\xEF\xBC\x81"},   // ！
+    {'?', "\xEF\xBC\x9F"},   // ？
+    {'(', "\xEF\xBC\x88"},   // （
+    {')', "\xEF\xBC\x89"},   // ）
+    {'[', "\xE3\x80\x8C"},   // 「
+    {']', "\xE3\x80\x8D"},   // 」
+};
+
+// Returns the full-width equivalent of a punctuation char, or `c` itself if
+// `c` is not a mapped punctuation (digits and other non-punctuation pass
+// through unchanged as half-width).
+static std::string punctuationOf(char c) {
+    auto it = kPunctuationMap.find(c);
+    if (it != kPunctuationMap.end()) return it->second;
+    return std::string(1, c);
+}
+
+static bool isPunctuation(char c) { return kPunctuationMap.count(c) > 0; }
 
 void GoogleIMEEngine::MyCandidateWord::select(
     fcitx::InputContext *ic) const {
-    engine_->commitCandidate(ic, text().toString());
+    // Mouse-click / keyboard selection both funnel through this one path,
+    // which carries matchedLength so partial (word-by-word) selection works.
+    engine_->selectCandidate(ic, candText_, matchedLength_);
 }
 
-void GoogleIMEEngine::commitCandidate(fcitx::InputContext *ic,
-                                     const std::string &text) {
+std::string GoogleIMEEngine::buildProbe(const GoogleIMEState *state) const {
+    // Google's own web client sends `|<committed>,<preedit>` so prior composed
+    // text acts as prediction context without being re-converted. With no
+    // context yet we send the preedit alone.
+    if (state->committed.empty()) return state->preedit;
+    return "|" + state->committed + "," + state->preedit;
+}
+
+void GoogleIMEEngine::trimCommitted(GoogleIMEState *state) const {
+    auto &str = state->committed;
+    if (str.empty()) return;
+    int cp = 0;
+    size_t i = str.size();
+    while (i > 0) {
+        --i;
+        // back up over any UTF-8 continuation bytes to the lead byte of a codepoint
+        while (i > 0 && (str[i] & 0xC0) == 0x80) --i;
+        ++cp;
+        if (cp == kMaxContextChars) {
+            // keep from this lead byte onward
+            if (i > 0) str.erase(0, i);
+            return;
+        }
+    }
+}
+
+void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
+                                      const std::string &text,
+                                      int matchedLength) {
     auto *state = ic ? ic->propertyFor(&stateFactory_) : nullptr;
     if (state) {
         // Invalidate any in-flight async results so a stale candidate list
         // cannot reappear after the user already selected a word.
         ++state->generation;
-        state->buffer.clear();
-        state->candidates.clear();
-        state->page = 0;
-        state->cursor = 0;
+        state->pendingPunctuation = 0;
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
+        // Extend the committed context with this selection (so subsequent
+        // words get predicted with it as context, matching Google's behavior)
+        // and remove the portion of the preedit that this candidate consumed.
+        state->committed += text;
+        trimCommitted(state);
+        int ml = matchedLength;
+        if (ml < 0) ml = 0;
+        if (ml > static_cast<int>(state->preedit.size()))
+            ml = static_cast<int>(state->preedit.size());
+        if (ml > 0) state->preedit.erase(0, ml);
+        state->candidates.clear();
+        state->page = 0;
+        state->cursor = 0;
     }
     if (ic) {
         ic->commitString(text);
-        ic->inputPanel().reset();
-        ic->updatePreedit();
-        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        if (!state || state->preedit.empty()) {
+            // Composition consumed entirely (or no state): hide the panel but
+            // KEEP committed context so the next word can use it as context.
+            ic->inputPanel().reset();
+            ic->updatePreedit();
+            ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        } else {
+            // Preedit remains (partial selection): re-render the reduced
+            // preedit immediately and re-query the leftover for fresh
+            // candidates.
+            renderPanel(ic);
+            scheduleRequest(ic, state);
+        }
     }
 }
 
@@ -61,17 +139,23 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
     auto &panel = ic->inputPanel();
     panel.reset();
 
-    if (state->buffer.empty()) {
+    if (state->preedit.empty()) {
         // Nothing to compose: show a blank panel.
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
         return;
     }
 
-    // Preedit is always rebuilt directly from the buffer — never from the
+    // Preedit is always rebuilt directly from `preedit` — never from the
     // displayed text or any derived field — so editing the buffer (including
     // backspace) is always reflected immediately and consistently.
-    const fcitx::Text preedit(state->buffer);
+    //
+    // NOTE: we show ONLY `preedit` here, never `committed + preedit`. The
+    // committed context has already been committed to the client via
+    // commitString(), so including it in the preedit would duplicate it in
+    // clients that render a client preedit (e.g. 你你hou). `committed` stays
+    // internal — it's used solely to build Google's prediction-context probe.
+    const fcitx::Text preedit(state->preedit);
 
     // Candidate window: render a kPageSize-wide window into the full candidate
     // vector starting at the current page.
@@ -86,8 +170,10 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
         if (state->cursor < 0) state->cursor = 0;
         if (state->cursor >= end - start) state->cursor = end - start - 1;
         for (int i = start; i < end; ++i) {
-            fcitx::Text t(state->candidates[i]);
-            cl->append(std::make_unique<MyCandidateWord>(std::move(t), this),
+            const auto &c = state->candidates[i];
+            fcitx::Text t(c.text);
+            cl->append(std::make_unique<MyCandidateWord>(
+                           std::move(t), this, c.text, c.matchedLength),
                        state->cursor);
         }
     }
@@ -109,15 +195,16 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
 }
 
 void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
-                                      std::vector<std::string> candidates,
+                                      std::vector<GoogleCandidate> candidates,
                                       std::string probe, uint64_t gen) {
     if (!ic) return;
     auto *state = ic->propertyFor(&stateFactory_);
     if (!state) return;
 
     // Drop stale results: either a newer edit happened (generation changed)
-    // or the buffer changed since this request was issued.
-    if (gen != state->generation || state->buffer != probe) {
+    // or the probe (committed context + preedit) changed since this request
+    // was issued.
+    if (gen != state->generation || probe != buildProbe(state)) {
         std::cerr << "GoogleIMEEngine: dropping stale result (gen=" << gen
                   << " vs " << state->generation << ")\n";
         return;
@@ -126,6 +213,61 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
     state->candidates = std::move(candidates);
     state->page = 0;
     state->cursor = 0;
+
+    // Deferred punctuation: the user typed punctuation while no candidates
+    // were available yet; we deferred resolving the composition until the
+    // in-flight response arrived. Resolve it now and then emit the
+    // punctuation. This prevents committing raw romanization just because the
+    // network was a beat slow (e.g. "nei," -> "你，" rather than "nei，").
+    if (state->pendingPunctuation) {
+        char pw = state->pendingPunctuation;
+        std::string out = punctuationOf(pw);
+        state->pendingPunctuation = 0;
+        std::string committedText;
+        if (!state->candidates.empty()) {
+            // Prefer the first full-consumption candidate (matchedLength covers
+            // the whole preedit); fall back to the top-ranked candidate.
+            size_t pick = 0;
+            const int full = static_cast<int>(state->preedit.size());
+            for (size_t i = 0; i < state->candidates.size(); ++i) {
+                if (state->candidates[i].matchedLength == full) {
+                    pick = i;
+                    break;
+                }
+            }
+            // Preserve all typed input (same rationale as commitPunctuation).
+            const auto &picked = state->candidates[pick];
+            std::string remainder = state->preedit;
+            int ml = picked.matchedLength;
+            if (ml > static_cast<int>(remainder.size()))
+                ml = static_cast<int>(remainder.size());
+            if (ml > 0) remainder.erase(0, ml);
+            committedText = picked.text;
+            // Append the unconsumed remainder to committedText so it's
+            // committed in one shot below.
+            committedText += remainder;
+        } else {
+            // No candidates came back: commit the romanization as-is.
+            committedText = state->preedit;
+        }
+        // End the sentence: commit the chosen text + the full-width
+        // punctuation, then clear composition state (including committed
+        // context — there's no longer a continuous sentence).
+        ++state->generation;
+        if (state->debounceTimer) state->debounceTimer.reset();
+        ic->commitString(committedText);
+        ic->commitString(out);
+        state->preedit.clear();
+        state->committed.clear();
+        state->candidates.clear();
+        state->page = 0;
+        state->cursor = 0;
+        ic->inputPanel().reset();
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        return;
+    }
+
     renderPanel(ic);
 }
 
@@ -164,13 +306,15 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     // is thread-safe); the main-thread callback reads it back. The shared_ptr
     // keeps the data alive across the thread handoff.
     struct AsyncResult {
-        std::vector<std::string> candidates;
+        std::vector<GoogleCandidate> candidates;
         std::string probe;
         uint64_t gen = 0;
         fcitx::TrackableObjectReference<fcitx::InputContext> icRef;
     };
     auto result = std::make_shared<AsyncResult>();
-    result->probe = state->buffer;
+    // `buildProbe` snapshots the committed context + preedit at dispatch time;
+    // it's what applyCandidates compares against to detect stale results.
+    result->probe = buildProbe(state);
     result->gen = state->generation;
     result->icRef = ic->watch();  // weak ref: safe even if the IC is destroyed
 
@@ -249,6 +393,38 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     const fcitx::Key &key = keyEvent.key();
     const fcitx::KeySym sym = key.sym();
 
+    // --- Resolve any pending deferred punctuation FIRST, before any branch
+    // below mutates state->preedit ---
+    // If a punctuation commit is waiting on an in-flight Google lookup
+    // (commitPunctuation's deferred path) and the user types/edits before
+    // that lookup returns, we must not let the async response apply the
+    // punctuation to preedit text the user has since changed (e.g. typing
+    // "nei" -> "," pending -> then typing "h" before the response arrives
+    // must NOT let a later response attach "，" after "neih"). Resolve
+    // synchronously right now using the raw preedit as it stands (no
+    // candidates are available yet in this race, by definition), then
+    // continue processing the current key against the now-clean state. The
+    // generation bump also makes the original async response a no-op when
+    // it eventually arrives.
+    if (state->pendingPunctuation != 0) {
+        const char pending = state->pendingPunctuation;
+        const std::string raw = state->preedit;
+        ++state->generation;
+        if (state->debounceTimer) state->debounceTimer.reset();
+        state->preedit.clear();
+        state->committed.clear();
+        state->candidates.clear();
+        state->page = 0;
+        state->cursor = 0;
+        state->pendingPunctuation = 0;
+        if (!raw.empty()) ic->commitString(raw);
+        ic->commitString(punctuationOf(pending));
+        ic->inputPanel().reset();
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        // Fall through: the current key is now handled against fresh state.
+    }
+
     // --- Candidate navigation (only meaningful when there are candidates) ---
     if (!state->candidates.empty() && state->cursor >= 0) {
         const int perPage = kPageSize;
@@ -317,7 +493,8 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
             const int pageStart = state->page * perPage;
             const int global = pageStart + idx;
             if (global < static_cast<int>(state->candidates.size())) {
-                commitCandidate(ic, state->candidates[global]);
+                const auto &c = state->candidates[global];
+                selectCandidate(ic, c.text, c.matchedLength);
             }
             keyEvent.filterAndAccept();
             return;
@@ -327,13 +504,14 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     // --- Space: commit the highlighted candidate, or - if no candidates have
     // arrived yet - force the lookup now. This keeps Space from leaking a
     // literal space into the client while the IME is still composing. ---
-    if (sym == FcitxKey_space && !state->buffer.empty()) {
+    if (sym == FcitxKey_space && !state->preedit.empty()) {
         if (!state->candidates.empty()) {
             const int perPage = kPageSize;
             const int global = state->page * perPage + state->cursor;
             if (global >= 0 &&
                 global < static_cast<int>(state->candidates.size())) {
-                commitCandidate(ic, state->candidates[global]);
+                const auto &c = state->candidates[global];
+                selectCandidate(ic, c.text, c.matchedLength);
             }
         } else {
             // No candidates yet (request in flight / not fired): cancel the
@@ -348,9 +526,40 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         return;
     }
 
-    // --- Printable input: append to buffer ---
+    // --- Punctuation: map half-width punctuation to full-width, emitted
+    // directly rather than being typed into the romanization buffer. This is
+    // what stops "," / "." etc. from getting stuck in the preedit until the
+    // user presses Enter. Numbers are intentionally NOT handled here (and not
+    // in the printable-input branch below either) so they always stay
+    // half-width, matching normal typing without the IME. ---
+    if (sym > 0x20 && sym <= 0x7e && isPunctuation(static_cast<char>(sym))) {
+        commitPunctuation(ic, state, static_cast<char>(sym));
+        keyEvent.filterAndAccept();
+        return;
+    }
+
+    // --- Printable input: append to the preedit ---
+    // Digits ('0'-'9') and tone-number digits are part of jyutping romanization
+    // and must reach the preedit while composing (e.g. "si3" with the tone
+    // number). When there's no active composition, digits should NOT be
+    // buffered or sent to Google — they should pass through to the client as
+    // ordinary ASCII digits (half-width), exactly as if the IME were off.
+    const char c = static_cast<char>(sym);
+    const bool isDigit = (sym >= '0' && sym <= '9');
+    const bool composing = !state->preedit.empty() || !state->candidates.empty() || state->pendingPunctuation;
+    if (isDigit && !composing) {
+        // Pass digits straight through, half-width, no buffering. The
+        // client now owns this digit directly, so our internal committed
+        // prediction context (which only reflects what THIS IME committed) is
+        // stale — clear it to avoid feeding Google a wrong context later.
+        if (!state->committed.empty()) {
+            state->committed.clear();
+            state->generation++;
+        }
+        return;
+    }
     if (sym > 0x20 && sym <= 0x7e) {
-        state->buffer.push_back(static_cast<char>(sym));
+        state->preedit.push_back(c);
         ++state->generation;
         // The old candidate set was for a different query: clear it so the
         // panel shows the updated preedit alone until the new debounced
@@ -366,19 +575,21 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         return;
     }
 
-    // --- Backspace: edit the buffer (the query) directly ---
+    // --- Backspace: edit the preedit directly ---
     // Only intercept Backspace while we are actively composing; otherwise let
     // the client handle it (e.g. delete selected text in the editor).
-    if (sym == FcitxKey_BackSpace && !state->buffer.empty()) {
-        state->buffer.pop_back();
+    if (sym == FcitxKey_BackSpace && !state->preedit.empty()) {
+        state->preedit.pop_back();
         ++state->generation;
         // The candidate set is now stale: clear it so the panel shows the
         // preedit alone until the new request returns.
         state->candidates.clear();
         state->page = 0;
         state->cursor = 0;
-        if (state->buffer.empty()) {
-            // Buffer emptied: hide the panel and cancel any pending request.
+        if (state->preedit.empty()) {
+            // Preedit emptied: hide the panel (but keep committed context —
+            // the user might resume typing the next word of the sentence)
+            // and cancel any pending request.
             if (state->debounceTimer) {
                 state->debounceTimer.reset();
             }
@@ -391,15 +602,17 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         return;
     }
 
-    // --- Enter: commit the raw buffer (latin escape hatch) and reset ---
+    // --- Enter: commit the raw preedit (latin escape hatch) and reset ---
     // Only meaningful while composing; otherwise let the client insert a newline.
-    if ((sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) && !state->buffer.empty()) {
-        ic->commitString(state->buffer);
+    if ((sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) && !state->preedit.empty()) {
+        ic->commitString(state->preedit);
         ++state->generation;
-        state->buffer.clear();
+        state->preedit.clear();
+        state->committed.clear();
         state->candidates.clear();
         state->page = 0;
         state->cursor = 0;
+        state->pendingPunctuation = 0;
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
@@ -411,12 +624,14 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     }
 
     // Escape: reset composition (only while composing).
-    if (sym == FcitxKey_Escape && (!state->buffer.empty() || !state->candidates.empty())) {
+    if (sym == FcitxKey_Escape && (!state->preedit.empty() || !state->candidates.empty())) {
         ++state->generation;
-        state->buffer.clear();
+        state->preedit.clear();
+        state->committed.clear();
         state->candidates.clear();
         state->page = 0;
         state->cursor = 0;
+        state->pendingPunctuation = 0;
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
@@ -427,7 +642,22 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         return;
     }
 
-    // Other keys (arrows other than up/down, etc.): let the client handle them.
+    // --- Other client-editing/navigation keys: pass through to the client ---
+    // Only clear stale committed-context here when we are NOT mid-composition
+    // (preedit empty implies candidates empty too, by construction elsewhere).
+    // If preedit is still non-empty (e.g. an unhandled arrow key pressed while
+    // composing, before candidates have arrived), leave committed alone —
+    // the user is still composing, not editing client text directly.
+    // Otherwise: the user is editing the client text directly (Delete,
+    // Return, arrows, Home/End, etc.) with no active composition. Our
+    // internal `committed` prediction context would then be stale — it
+    // reflects only what this IME committed, not the client's actual current
+    // text — so clear it to avoid feeding Google a wrong prediction context
+    // for the next composition.
+    if (state->preedit.empty() && !state->committed.empty()) {
+        state->committed.clear();
+        state->generation++;
+    }
 }
 
 void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
@@ -439,10 +669,12 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     if (!state) return;
 
     ++state->generation;
-    state->buffer.clear();
+    state->preedit.clear();
+    state->committed.clear();
     state->candidates.clear();
     state->page = 0;
     state->cursor = 0;
+    state->pendingPunctuation = 0;
     if (state->debounceTimer) {
         state->debounceTimer.reset();
     }
@@ -457,6 +689,83 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     // Instead, bumping the generation above makes any in-flight callback a
     // no-op (generation mismatch in applyCandidates), and the source then
     // self-removes from pendingEvents_ when its callback fires.
+}
+
+void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
+                                        GoogleIMEState *state,
+                                        char halfWidth) {
+    std::string out = punctuationOf(halfWidth);
+
+    if (state->preedit.empty()) {
+        // No composition active: emit the punctuation directly. Punctuation
+        // conventionally ends a sentence, so we deliberately clear the
+        // committed prediction context here (below) rather than keep it
+        // across the punctuation — the next composition should start a fresh
+        // context, not continue predicting off the pre-punctuation sentence.
+        ic->commitString(out);
+        ++state->generation;
+        state->committed.clear();
+        state->candidates.clear();
+        state->page = 0;
+        state->cursor = 0;
+        state->pendingPunctuation = 0;
+        if (state->debounceTimer) {
+            state->debounceTimer.reset();
+        }
+        ic->inputPanel().reset();
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        return;
+    }
+
+    // Composition is active: resolve it before emitting punctuation.
+    if (!state->candidates.empty()) {
+        // Prefer the first full-consumption candidate (matchedLength covers
+        // the whole preedit); fall back to the top-ranked candidate.
+        size_t pick = 0;
+        const int full = static_cast<int>(state->preedit.size());
+        for (size_t i = 0; i < state->candidates.size(); ++i) {
+            if (state->candidates[i].matchedLength == full) {
+                pick = i;
+                break;
+            }
+        }
+        // Preserve all typed input: commit the candidate, then whatever
+        // preedit the candidate did NOT consume (the remainder), then the
+        // punctuation. E.g. preedit "singsida" picking "城市" (matchedLength
+        // 6) yields "城市da，" rather than dropping "da".
+        const auto &picked = state->candidates[pick];
+        std::string remainder = state->preedit;
+        int ml = picked.matchedLength;
+        if (ml > static_cast<int>(remainder.size()))
+            ml = static_cast<int>(remainder.size());
+        if (ml > 0) remainder.erase(0, ml);
+        ++state->generation;
+        if (state->debounceTimer) state->debounceTimer.reset();
+        ic->commitString(picked.text);
+        if (!remainder.empty()) ic->commitString(remainder);
+        ic->commitString(out);
+        state->preedit.clear();
+        state->committed.clear();
+        state->candidates.clear();
+        state->page = 0;
+        state->cursor = 0;
+        state->pendingPunctuation = 0;
+        ic->inputPanel().reset();
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        return;
+    }
+
+    // Candidates are not available yet (request in flight or not yet fired).
+    // Defer: cancel any pending debounce and fire the lookup immediately so
+    // the deferred-resolution path in applyCandidates handles it as soon as
+    // results arrive.
+    state->pendingPunctuation = halfWidth;
+    if (state->debounceTimer) {
+        state->debounceTimer.reset();
+    }
+    dispatchRequest(ic, state);
 }
 
 GoogleIMEEngine::GoogleIMEEngine(fcitx::Instance *instance) : instance_(instance) {
