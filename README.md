@@ -10,7 +10,7 @@ This project provides a prototype that connects fcitx5 to Google Input Tools. (a
 
 Structure:
 - daemon/: Python daemon that queries Google Input Tools and exposes a local HTTP API (/suggest)
-- cpp/: C++ skeleton for a fcitx5 input-method module that forwards composition/candidate requests to the daemon (needs fcitx5 dev headers to build)
+- cpp/: A fcitx5 input-method module that forwards composition/candidate requests to the daemon (needs fcitx5 dev headers to build)
 
 Quick start (daemon prototype):
 
@@ -26,20 +26,12 @@ Quick start (daemon prototype):
 
 3. Test:
 
-   curl "http://127.0.0.1:8765/suggest?q=nei&itc=zh-t-i0-pinyin&num=8"
+   curl "http://127.0.0.1:8765/suggest?q=leihou&itc=yue-hant-t-i0-und&num=8"
 
-## Notes and Next Steps
-
-- The Python daemon is a working prototype. To make a native fcitx5 IME, build the C++ plugin in cpp/ and register it as an fcitx5 addon. The cpp/ code here is a starting skeleton that needs the fcitx5 development headers and a small amount of glue to compile and register as an IM engine.
-- After building and installing the fcitx5 plugin, the plugin should forward composition events to the daemon and display the returned candidates.
-
-If you want, proceed now and the next step will be: create the C++ plugin integration (implementation + build instructions) and test it against the running daemon.
-
-Podman / containerized build (Fedora)
 
 ## Building
 
-`just` scripts are included to conveniently build and test stuff in a containerized way:
+`just` scripts are included to conveniently build and test stuff in a containerized way using Podman:
 
 ```bash
 just setup-venv     # setup python venv and install deps for daemon
@@ -49,7 +41,19 @@ just build-container # build the container
 just build   # build the C++ project inside the Fedora container
 ```
 
+## Installation
+
+Very rudimentary for now, use `just install`, which copies the relavant files to the correct places. However, note that you may also have to either:
+
+- `sudo cp /usr/local/lib/fcitx5/libfcitx5-google-ime.so /usr/lib64/fcitx5/libfcitx5-google-ime.so`, or
+- `echo "/usr/local/lib" | sudo tee -a /etc/ld.so.conf.d/google-ime.conf`
+
+as otherwise`fcitx5` may not recognize the `.so` in `/usr/local`.
+
+
+
 ## Notes
 
-- The C++ code is a near-complete skeleton that includes the HTTP client and clear integration points for wiring into fcitx5's engine APIs. Building the final plugin requires the fcitx5 development headers on the build host or in the container.
-- After building and installing the plugin into the appropriate fcitx5 modules directory, restart fcitx5 and enable the input method.
+`engine.cc` is a feature-complete fcitx5 InputMethodEngine that builds against `Fcitx5::Core` and implements the full keypress → async Google query → candidate panel → commit loop.
+
+Most other things are unfinished and will have a lot of bugs.
