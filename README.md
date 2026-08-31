@@ -40,7 +40,7 @@ Key points:
 - Google's endpoint expects `text=` separated by `|` and `,` to check both preedit and the context of previous words to give a better prediction.
 - The response from the HTTPS request also sends back the proper "spelling" of each word, which is also shown in the CandidateList with subtext.
 
-The Cantonese input code is `yue-hant-t-i0-und` (Traditional Chinese, Cantonese, 廣東話輸入法). You can pass a different `itc` for other Google Input Tools layouts, e.g. `zh-t-i0-pinyin` for Mandarin pinyin. The `itc` is **user-configurable** — see [Configuration](#configuration) — and defaults to `yue-hant-t-i0-und` (compiled in as `GoogleIMEEngine::kInputCode`, used as the fallback when the user leaves the field blank).
+The Cantonese input code is `yue-hant-t-i0-und` (Traditional Chinese, Cantonese, 廣東話輸入法). You can pass a different `itc` for other Google Input Tools layouts, e.g. `zh-t-i0-pinyin` for Mandarin pinyin. The `itc` is **user-configurable** — see [Configuration](#configuration) — and defaults to Cantonese (`yue-hant-t-i0-und`, compiled in as `GoogleIMEEngine::kInputCode`, used as the fallback when no layout is selected).
 
 ## Quick start
 
@@ -116,33 +116,33 @@ After installing, restart fcitx5 (`fcitx5 -r -d`) and add the "Google IME" input
 
 ## Configuration
 
-The input layout (the Google Input Tools `itc` code, sent as the `&itc=` query parameter) is user-configurable through fcitx5's standard configuration GUI — which on KDE Plasma is the **Input Method** module in KDE Plasma Settings (the `kcm_fcitx5` KCM), and `fcitx5-configtool` elsewhere. The addon metadata sets `Configurable=True`, and the engine exposes a `GoogleIMEConfig` (`src/config.h`) with a single `InputCode` option; fcitx5 introspects that option and generates the text field in the settings UI automatically, with no separate config-description file or KCM-specific code.
+The input layout (the Google Input Tools `itc` code, sent as the `&itc=` query parameter) is user-configurable through fcitx5's standard configuration GUI — which on KDE Plasma is the **Input Method** module in KDE Plasma Settings (the `kcm_fcitx5` KCM), and `fcitx5-configtool` elsewhere. The addon metadata sets `Configurable=True`, and the engine exposes a `GoogleIMEConfig` (`src/config.h`) with a **Layout** dropdown and a **CustomInputCode** text field; fcitx5 introspects those options and generates the dropdown + text box in the settings UI automatically, with no separate config-description file or KCM-specific code.
 
 To change the layout:
 
 1. Open **KDE Plasma Settings → Input Method** (or run `fcitx5-configtool`).
 2. Select the **Google IME** input method in the list and click its **Configure** (gear) button.
-3. Edit the **InputCode** field to the Google Input Tools code for the layout you want (see the table below) and apply.
+3. Pick a layout from the **Input layout** dropdown. For **Custom**, also fill in the **CustomInputCode** field with the Google Input Tools `itc` code you want, then apply.
 
-The chosen value is saved to `~/.config/fcitx5/conf/google-ime.conf` and takes effect on the next keystroke (an in-flight request for the previous layout is discarded, so switching layouts mid-composition never commits stale candidates). Leave the field blank to fall back to the compiled-in Cantonese default.
+The chosen value is saved to `~/.config/fcitx5/conf/google-ime.conf` and takes effect on the next keystroke (an in-flight request for the previous layout is discarded, so switching layouts mid-composition never commits stale candidates). If **Custom** is selected but the code field is left blank, the engine falls back to the compiled-in Cantonese default.
 
-Common `itc` codes:
+Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
-| Code | Layout |
+| Layout | `itc` code |
 |---|---|
-| `yue-hant-t-i0-und` | Cantonese, Traditional (default) |
-| `zh-t-i0-pinyin` | Mandarin pinyin |
-| `zh-t-i0-wubi` | Wubi (simplified) |
-| `zh-hant-t-i0-cangjie` | Cangjie, Traditional |
-| `zh-t-i0-bopomofo` | Bopomofo / Zhuyin |
+| Cantonese (default) | `yue-hant-t-i0-und` |
+| Mandarin Pinyin | `zh-t-i0-pinyin` |
+| Wubi | `zh-t-i0-wubi-1986` |
+| Cangjie | `zh-hant-t-i0-cangjie-1982` |
+| Custom | (your `itc` code in the CustomInputCode field) |
+
+> You can find the `itc` code by using the browser inspect menu inside the Network pane on the Google Input Tools site.
 
 ## Behavior notes
 
-- **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). The official "try" page coalesces rapid keystrokes client-side rather than firing one request per key, so this plugin does the same: a 150 ms debounce timer is reset on every keystroke, so only the final query is sent. Stale in-flight responses are discarded via a per-input-context generation counter, so fast typing can never show an outdated candidate list.
-- **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields no longer corrupts the composition.
+- **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). A `kDebounceMs` (15 ms) debounce timer is reset on every keystroke; that is short enough to coalesce only genuinely-simultaneous events (e.g. IME engines that synthesize multiple key events per physical keystroke) while still firing effectively one request per real keystroke (matching observed Google behavior, where successive requests are ~50-120 ms apart). Stale in-flight responses are discarded via a per-input-context generation counter.
+- **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields does not corrupt the composition.
 
 ## Notes
 
 `engine.cc` is a feature-complete fcitx5 `InputMethodEngine` that builds against `Fcitx5::Core` and implements the full keypress → async Google query → candidate panel → commit loop.
-
-Known gaps: no result caching across identical queries.

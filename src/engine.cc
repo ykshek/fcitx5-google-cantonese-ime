@@ -1009,7 +1009,27 @@ void GoogleIMEEngine::reloadConfig() {
     // readAsIni resolves "conf/google-ime.conf" against fcitx5's PkgConfig
     // search path (~/.config/fcitx5 then the system data dir), exactly where
     // the KCM / fcitx5-configtool writes the user's edited options.
-    readAsIni(config_, configFile);
+    //
+    // Read into a RawConfig first so we can migrate the legacy single
+    // "InputCode" option (free-text itc code) to the Layout dropdown +
+    // CustomInputCode pair. The migration runs at most once: it only fires when
+    // the old InputCode key is present and the new Layout key is absent, and it
+    // persists the rewritten config so subsequent loads skip it. Without this, a
+    // user who had configured e.g. pinyin would be silently reset to Cantonese.
+    fcitx::RawConfig raw;
+    readAsIni(raw, configFile);
+    const std::string *legacy = raw.valueByPath("InputCode");
+    if (legacy && !legacy->empty() && !raw.valueByPath("Layout")) {
+        GoogleInputLayout l = googleLayoutFromItc(*legacy);
+        raw.setValueByPath("Layout", GoogleInputLayoutToString(l));
+        if (l == GoogleInputLayout::Custom) {
+            // Unknown code: keep it as the Custom value so the user can edit it.
+            raw.setValueByPath("CustomInputCode", *legacy);
+        }
+        raw.setValueByPath("InputCode", "");  // drop the legacy key
+        safeSaveAsIni(raw, configFile);
+    }
+    config_.load(raw, false);
     // Layout changed: any in-flight request that used the previous layout is
     // now stale and must not be allowed to commit candidates (see configGen
     // guard in applyCandidates).
@@ -1026,10 +1046,13 @@ void GoogleIMEEngine::setConfig(const fcitx::RawConfig &config) {
 }
 
 std::string GoogleIMEEngine::effectiveInputCode() const {
-    // The Google Input Tools `itc` code to send. Falls back to the
-    // compiled-in Cantonese default (kInputCode) when the user left the field
-    // blank, so the addon keeps working out of the box with no config file.
-    std::string code = config_.inputCode.value();
+    // The Google Input Tools `itc` code to send. The selected dropdown layout
+    // is resolved to its code via googleLayoutItc(); for the "Custom" layout
+    // the user-supplied string is used verbatim. Falls back to the compiled-in
+    // Cantonese default (kInputCode) when that resolves to empty, so the addon
+    // keeps working out of the box with no config file.
+    std::string code = googleLayoutItc(config_.layout.value(),
+                                      config_.customInputCode.value());
     if (code.empty()) return kInputCode;
     return code;
 }

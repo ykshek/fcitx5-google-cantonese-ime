@@ -8,4 +8,4 @@ Addon=google-ime
 # Configure button in the KCM / fcitx5-configtool, mirroring Configurable=True
 # in the addon metadata.
 Configurable=True
-Description=Cantonese (Traditional) input via Google Input Tools. Sends romanized input to Google over HTTPS and returns candidate characters. Requires network access; prototype, not for production use.
+Description=Chinese input via Google Input Tools. Sends romanized input to Google over HTTPS and returns candidate characters. The input layout (Cantonese, Mandarin Pinyin, Wubi, Cangjie, or a custom itc code) is configurable in the addon settings. Requires network access.
