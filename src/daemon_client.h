@@ -21,6 +21,13 @@ struct GoogleCandidate {
     // Number of leading bytes (latin, so bytes == chars) of the *preedit*
     // this candidate consumes. Always in [1, preedit.size()].
     int matchedLength = 0;
+
+    // The romanized spelling / annotation Google returns for this candidate,
+    // parsed from the "annotation" array in the response (parallel to the
+    // candidate array). When non-empty it is shown as small subtext next to
+    // the candidate word in the panel (via CandidateWord::setComment). It is
+    // purely informational and never participates in selection or commit.
+    std::string annotation;
 };
 
 // text: raw romanized input typed by the user (e.g. latin letters / jyutping)

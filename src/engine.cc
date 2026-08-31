@@ -245,7 +245,7 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
             fcitx::Text t(c.text);
             cl->append(std::make_unique<MyCandidateWord>(
                            std::move(t), this, c.text, c.matchedLength,
-                           state->candidatesProbe),
+                           state->candidatesProbe, c.annotation),
                        state->cursor);
         }
     }

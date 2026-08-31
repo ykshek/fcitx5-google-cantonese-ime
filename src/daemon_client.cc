@@ -229,6 +229,11 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
     // Google Input Tools response shape:
     //   ["SUCCESS", [["<echoed preedit>", ["cand1", "cand2", ...], [], {"matched_length":[...], "annotation":[...], ...}]]]
     //
+    // The optional "annotation" array (parallel to the candidate array) holds
+    // Google's romanized spelling of each candidate (e.g. jyutping "nei" for
+    // 你); we store it on the candidate and the engine renders it as small
+    // subtext next to the candidate word via CandidateWord::setComment.
+    //
     // nlohmann::json decodes \uXXXX escapes (and UTF-16 surrogate pairs) into
     // real UTF-8 for us, so the candidate strings returned here are already
     // valid UTF-8 -- no manual unescaping is needed in the engine.
@@ -271,6 +276,24 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
             }
         }
 
+        // Optional per-candidate "annotation" array: Google's romanized
+        // spelling of each candidate (e.g. jyutping "nei" for 你), parallel to
+        // the candidate array `cands`. We push an empty string for any
+        // non-string entry so the index still lines up 1:1 with `cands[i]`;
+        // only genuine presence/absence of the array changes the count.
+        std::vector<std::string> annotations;
+        if (first.size() >= 4 && first[3].is_object() &&
+            first[3].contains("annotation") &&
+            first[3]["annotation"].is_array()) {
+            for (const auto& a : first[3]["annotation"]) {
+                if (a.is_string()) {
+                    annotations.push_back(a.get<std::string>());
+                } else {
+                    annotations.emplace_back();
+                }
+            }
+        }
+
         const auto& cands = first[1];
         if (!cands.is_array()) return out;
         for (size_t i = 0; i < cands.size(); ++i) {
@@ -279,6 +302,8 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
             c.text = cands[i].get<std::string>();
             c.matchedLength =
                 (i < matchedLengths.size()) ? matchedLengths[i] : defaultLen;
+            c.annotation =
+                (i < annotations.size()) ? annotations[i] : "";
             out.push_back(std::move(c));
         }
     } catch (const std::exception& e) {

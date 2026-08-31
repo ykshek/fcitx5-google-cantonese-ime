@@ -238,10 +238,18 @@ private:
     public:
         MyCandidateWord(fcitx::Text text, GoogleIMEEngine *engine,
                         std::string candText, int matchedLength,
-                        std::string probe)
+                        std::string probe, std::string annotation)
             : fcitx::CandidateWord(std::move(text)), engine_(engine),
               candText_(std::move(candText)), matchedLength_(matchedLength),
-              probe_(std::move(probe)) {}
+              probe_(std::move(probe)) {
+            // Render Google's romanized spelling as small subtext next to the
+            // candidate word. classicui draws the comment in a smaller font
+            // alongside the candidate text; it is display-only and never
+            // affects selection or commit (which use candText_).
+            if (!annotation.empty()) {
+                setComment(fcitx::Text(std::move(annotation)));
+            }
+        }
         void select(fcitx::InputContext *ic) const override;
 
     private:
