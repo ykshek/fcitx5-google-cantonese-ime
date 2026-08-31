@@ -103,8 +103,6 @@ jobs:
       id: release_notes
       run: |
         cat > release_notes.md << EOF
-        fcitx5 Cantonese input method backed by Google Input Tools.
-
         A self-contained fcitx5 engine that queries Google Input Tools over HTTPS.
 
         ## Installation (Fedora 44)
