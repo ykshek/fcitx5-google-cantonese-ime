@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(fcitx5-google-cantonese-ime VERSION 1.2.0 LANGUAGES CXX)
+project(fcitx5-google-cantonese-ime VERSION 1.2.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
