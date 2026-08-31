@@ -73,9 +73,8 @@ FCITX_CONFIGURATION(
     // filled this in yet.
     fcitx::Option<std::string> customInputCode{
         this, "CustomInputCode",
-        _("Custom Google Input Tools code (the &itc= value, used only when "
-          "Layout is Custom). Examples: yue-hant-t-i0-und (Cantonese), "
-          "zh-t-i0-pinyin (Mandarin pinyin)"),
+        _("Custom itc= code (used only when "
+          "Layout is Custom)"),
         "yue-hant-t-i0-und"};
 )
 
