@@ -4,4 +4,8 @@ Icon=fcitx-cantonese
 Label=粵
 LangCode=zh
 Addon=google-ime
+# Expose the GoogleIMEConfig options (src/config.h) under this input method's
+# Configure button in the KCM / fcitx5-configtool, mirroring Configurable=True
+# in the addon metadata.
+Configurable=True
 Description=Cantonese (Traditional) input via Google Input Tools. Sends romanized input to Google over HTTPS and returns candidate characters. Requires network access; prototype, not for production use.

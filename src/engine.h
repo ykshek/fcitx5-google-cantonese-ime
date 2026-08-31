@@ -9,6 +9,8 @@
 #include <fcitx/inputcontext.h>      // for InputContext
 #include <fcitx-utils/event.h>       // for EventSource / EventLoop
 #include <fcitx-utils/trackableobject.h>
+#include <fcitx-config/configuration.h>  // for Configuration (getConfig override)
+#include <fcitx-config/rawconfig.h>       // for RawConfig (setConfig override)
 
 #include <atomic>
 #include <cstdint>
@@ -18,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "config.h"        // GoogleIMEConfig (user-configurable itc layout)
 #include "daemon_client.h"  // GoogleCandidate
 
 // Number of candidates shown per page in the candidate panel.
@@ -70,6 +73,16 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // Used by candidatesFresh() to guard selection paths from committing an
     // out-of-date candidate list while a newer lookup is still in flight.
     std::string candidatesProbe;
+
+    // The configGeneration_ snapshot at which the current candidate list was
+    // computed. candidatesFresh() compares this against the live
+    // configGeneration_ so that, after the user switches the input layout
+    // (Cantonese -> pinyin etc.), any candidates still visible from the OLD
+    // layout become unselectable (forcing a fresh lookup) rather than being
+    // committed against the new layout. Without this, switching layout while
+    // candidates are on screen would let Space / a digit commit an old-layout
+    // candidate before the new-layout lookup returns.
+    uint64_t candidatesConfigGeneration = 0;
 
     // Current candidate page (0-based) and the highlighted candidate index
     // within the current page (-1 = none highlighted).
@@ -197,6 +210,25 @@ public:
     void reset(const fcitx::InputMethodEntry &entry,
                fcitx::InputContextEvent &event) override;
 
+    // --- Configuration (KCM / fcitx5-configtool) ---
+    // The addon metadata sets Configurable=True, so fcitx5's configuration GUI
+    // (the KDE Plasma Settings "Input Method" module, kcm_fcitx5, or
+    // fcitx5-configtool) calls these to read/write the option set declared in
+    // GoogleIMEConfig (src/config.h). fcitx5 introspects that Configuration
+    // subclass and renders a UI for its Option members automatically — there is
+    // no separate config-description file and no KCM-specific code to ship.
+    static constexpr char configFile[] = "conf/google-ime.conf";
+    void reloadConfig() override;
+    const fcitx::Configuration *getConfig() const override { return &config_; }
+    void setConfig(const fcitx::RawConfig &config) override;
+
+    // The currently configured Google Input Tools `itc` code, falling back to
+    // the compiled-in Cantonese default if the user left the field blank.
+    // Read on the main thread and snapshotted into each async request before
+    // the worker thread is spawned, so the worker never touches the
+    // Configuration object directly (it is not guarded by a mutex).
+    std::string effectiveInputCode() const;
+
     // Rebuild the input panel (preedit + candidate window) from the current
     // per-IC state. Called on the main thread after every buffer edit and
     // after every candidate-navigation key.
@@ -212,7 +244,8 @@ public:
     void applyCandidates(fcitx::InputContext *ic,
                          std::vector<GoogleCandidate> candidates,
                          std::string probe, uint64_t gen,
-                         uint64_t serial, int num, int targetPage);
+                         uint64_t serial, int num, int targetPage,
+                         uint64_t configGen);
 
     // Select a candidate: commit its text, extend the committed context,
     // consume `matchedLength` bytes from the front of the preedit, and
@@ -333,6 +366,22 @@ private:
     // default-constructs (it does `new GoogleIMEState` per input context).
     fcitx::SimpleInputContextPropertyFactory<GoogleIMEState> stateFactory_;
     fcitx::Instance *instance_{nullptr};
+
+    // User-configurable options (see src/config.h). Read/written only on the
+    // main thread: reloadConfig()/setConfig() are invoked by fcitx5's config
+    // D-Bus on the main thread, and effectiveInputCode() is read on the main
+    // thread in dispatchRequest before the worker is spawned. So no mutex is
+    // needed to guard access to config_ itself.
+    GoogleIMEConfig config_;
+
+    // Bumped whenever the input layout changes (reloadConfig / setConfig).
+    // Each in-flight request snapshots this at dispatch time; if it no longer
+    // matches when the response arrives, applyCandidates drops the result —
+    // so a request issued for the OLD layout can never overwrite the panel or
+    // be committed after the user has switched layouts (e.g. Cantonese ->
+    // pinyin). Atomic because it is read in applyCandidates (main thread) and
+    // compared against the snapshot captured in the worker-posted result.
+    std::atomic<uint64_t> configGeneration_{0};
 
     // Outstanding async event sources (one per in-flight request). Kept alive
     // here so the source is not destroyed before the worker thread calls

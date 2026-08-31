@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "config.h"       // GoogleIMEConfig (user-configurable itc layout)
 #include "daemon_client.h"  // get_candidates() queries Google Input Tools directly
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <memory>
 #include <thread>
 
+#include <fcitx-config/iniparser.h>  // readAsIni / safeSaveAsIni
 #include <fcitx/addonmanager.h>
 #include <fcitx/candidatelist.h>
 #include <fcitx/event.h>
@@ -154,7 +156,14 @@ bool GoogleIMEEngine::candidatesFresh(const GoogleIMEState *state) const {
     // paths care about (there is nothing to select from), so treat empty lists
     // as unselectable rather than accidentally-usable.
     if (state->candidates.empty()) return false;
-    return state->candidatesProbe == buildProbe(state);
+    // Fresh requires BOTH that the probe (committed context + preedit) still
+    // matches the current state, AND that the input layout has not changed
+    // since the list was computed. The layout check makes any candidates still
+    // visible from a previous layout unselectable after the user switches
+    // layouts, forcing a fresh lookup with the new layout instead of letting
+    // Space / a digit commit an old-layout candidate.
+    return state->candidatesProbe == buildProbe(state) &&
+           state->candidatesConfigGeneration == configGeneration_.load();
 }
 
 void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
@@ -269,25 +278,29 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
 void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
                                       std::vector<GoogleCandidate> candidates,
                                       std::string probe, uint64_t gen,
-                                      uint64_t serial, int num, int targetPage) {
+                                      uint64_t serial, int num, int targetPage,
+                                      uint64_t configGen) {
     if (!ic) return;
     auto *state = ic->propertyFor(&stateFactory_);
     if (!state) return;
 
-    // Drop stale results: either a newer edit happened (generation changed),
-    // the probe (committed context + preedit) changed, OR a newer request
-    // superseded this one (serial changed — e.g. a "fetch more" with a larger
-    // num was issued for the same unchanged preedit). This is expected and
-    // frequent with the short debounce, so we don't log it — spamming stderr on
-    // every dropped result only adds I/O overhead on the exact fast-typing
-    // path we're trying to optimize.
+    // Drop stale results: a newer edit happened (generation changed), the probe
+    // (committed context + preedit) changed, a newer request superseded this
+    // one (serial changed — e.g. a "fetch more" with a larger num was issued
+    // for the same unchanged preedit), OR the user changed the input layout
+    // since this request was dispatched (configGen changed). That last guard is
+    // what stops a request issued for the OLD layout (e.g. Cantonese) from
+    // overwriting the panel / being committed after the user has switched to a
+    // new layout (e.g. pinyin). Expected and frequent, so not logged.
     if (gen != state->generation || probe != buildProbe(state) ||
-        serial != state->requestSerial) {
+        serial != state->requestSerial ||
+        configGen != configGeneration_.load()) {
         return;
     }
 
     state->candidates = std::move(candidates);
     state->candidatesProbe = probe;
+    state->candidatesConfigGeneration = configGen;
     state->candidatesNum = num;
     state->moreFetchPage = -1;  // this in-flight fetch (if any) is now resolved
     // Land on the page this result was meant to populate: 0 for a normal
@@ -414,6 +427,17 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
         uint64_t serial = 0;
         int num = 0;
         int targetPage = 0;
+        // Google Input Tools `itc` code snapshotted on the main thread at
+        // dispatch time (effectiveInputCode()). The worker thread reads only
+        // this copy, never the live Configuration object, so no mutex is needed
+        // for the config read itself.
+        std::string inputCode;
+        // configGeneration_ snapshot at dispatch time. If the user changes the
+        // input layout while this request is in flight, this no longer matches
+        // configGeneration_ when the response arrives and applyCandidates drops
+        // it — preventing an old-layout candidate list from overwriting the
+        // panel or being committed after a layout switch.
+        uint64_t configGen = 0;
         fcitx::TrackableObjectReference<fcitx::InputContext> icRef;
     };
     auto result = std::make_shared<AsyncResult>();
@@ -424,6 +448,11 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     result->serial = state->requestSerial;
     result->num = num;
     result->targetPage = targetPage;
+    // Snapshot the configured layout NOW, on the main thread: the worker must
+    // not touch config_ (not mutex-guarded) and must use a single consistent
+    // itc for its request even if the user changes the layout mid-flight.
+    result->inputCode = effectiveInputCode();
+    result->configGen = configGeneration_.load();
     result->icRef = ic->watch();  // weak ref: safe even if the IC is destroyed
 
     auto *engine = this;
@@ -443,7 +472,8 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
                     engine->applyCandidates(ic, result->candidates,
                                            result->probe, result->gen,
                                            result->serial, result->num,
-                                           result->targetPage);
+                                           result->targetPage,
+                                           result->configGen);
                 } catch (const std::exception &e) {
                     std::cerr << "GoogleIMEEngine(applyCandidates): exception: "
                               << e.what() << "\n";
@@ -474,7 +504,7 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     std::thread worker([engine, result, raw, num]() {
         try {
             result->candidates =
-                get_candidates(result->probe, kInputCode, num);
+                get_candidates(result->probe, result->inputCode, num);
         } catch (const std::exception &e) {
             std::cerr << "GoogleIMEEngine(worker): get_candidates exception: "
                       << e.what() << "\n";
@@ -968,9 +998,41 @@ GoogleIMEEngine::GoogleIMEEngine(fcitx::Instance *instance) : instance_(instance
         instance_->inputContextManager().registerProperty("googleImeState",
                                                           &stateFactory_);
     }
+    // Load the user's configured input layout (if any) before the first
+    // keystroke so the addon starts in the layout the user picked in the KCM.
+    reloadConfig();
 }
 
 GoogleIMEEngine::~GoogleIMEEngine() = default;
+
+void GoogleIMEEngine::reloadConfig() {
+    // readAsIni resolves "conf/google-ime.conf" against fcitx5's PkgConfig
+    // search path (~/.config/fcitx5 then the system data dir), exactly where
+    // the KCM / fcitx5-configtool writes the user's edited options.
+    readAsIni(config_, configFile);
+    // Layout changed: any in-flight request that used the previous layout is
+    // now stale and must not be allowed to commit candidates (see configGen
+    // guard in applyCandidates).
+    ++configGeneration_;
+}
+
+void GoogleIMEEngine::setConfig(const fcitx::RawConfig &config) {
+    // Called by fcitx5's config D-Bus (the KCM / fcitx5-configtool) when the
+    // user edits an option. load(partial=true) keeps un-edited options at their
+    // current value, then we persist and bump the layout generation.
+    config_.load(config, true);
+    safeSaveAsIni(config_, configFile);
+    ++configGeneration_;
+}
+
+std::string GoogleIMEEngine::effectiveInputCode() const {
+    // The Google Input Tools `itc` code to send. Falls back to the
+    // compiled-in Cantonese default (kInputCode) when the user left the field
+    // blank, so the addon keeps working out of the box with no config file.
+    std::string code = config_.inputCode.value();
+    if (code.empty()) return kInputCode;
+    return code;
+}
 
 fcitx::AddonInstance *GoogleIMEFactory::create(fcitx::AddonManager *manager) {
     return new GoogleIMEEngine(manager ? manager->instance() : nullptr);
