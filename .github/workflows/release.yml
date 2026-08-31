@@ -106,7 +106,6 @@ jobs:
         fcitx5 Cantonese input method backed by Google Input Tools.
 
         A self-contained fcitx5 engine that queries Google Input Tools over HTTPS.
-        No separate daemon, no Python runtime.
 
         ## Installation (Fedora 44)
 
