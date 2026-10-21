@@ -77,6 +77,29 @@ jobs:
         find rpmbuild/RPMS -name "*.rpm" -type f
         find rpmbuild/SRPMS -name "*.rpm" -type f
 
+    - name: Install Flatpak build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y flatpak flatpak-builder
+
+    - name: Install Flatpak build runtimes
+      run: |
+        flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        flatpak install --user --noninteractive --assumeyes flathub \
+          org.kde.Sdk//6.11 \
+          org.fcitx.Fcitx5//stable
+
+    - name: Build and verify Flatpak add-on
+      run: |
+        flatpak-builder --user --force-clean --disable-rofiles-fuse \
+          --install-deps-from=flathub \
+          --repo=build/flatpak-repo \
+          build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+        test -f build/flatpak/files/app/addons/GoogleIME/lib/fcitx5/libfcitx5-google-ime.so
+        test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
+        test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
+        test -f build/flatpak/files/app/addons/GoogleIME/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+
     - name: Upload build artifacts
       if: always()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

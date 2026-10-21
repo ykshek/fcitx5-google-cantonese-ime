@@ -95,6 +95,22 @@ rpm: build-container
     find rpmbuild/RPMS -name "*.rpm" -type f
     find rpmbuild/SRPMS -name "*.rpm" -type f
 
+flatpak-build:
+    flatpak run --command=flathub-build org.flatpak.Builder \
+        --user --force-clean --disable-rofiles-fuse \
+        --install-deps-from=flathub \
+        --repo=build/flatpak-repo \
+        build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+    test -f build/flatpak/files/app/addons/GoogleIME/lib/fcitx5/libfcitx5-google-ime.so
+    test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
+    test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
+
+flatpak-install:
+    flatpak run --command=flathub-build org.flatpak.Builder \
+        --user --install --force-clean --disable-rofiles-fuse \
+        --install-deps-from=flathub \
+        build/flatpak-install flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+
 bump-version version:
     #!/usr/bin/env bash
     set -euo pipefail
