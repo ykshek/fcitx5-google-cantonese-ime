@@ -34,8 +34,8 @@ modules:
       - /share/doc
       - /share/man
     sources:
-      - type: dir
-        path: ..
+      - type: archive
+        path: source.tar.gz
   - name: addon-metadata
     buildsystem: simple
     build-commands:
@@ -43,6 +43,6 @@ modules:
       - install -Dm644 org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml ${FLATPAK_DEST}/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     sources:
       - type: file
-        path: ../LICENSE
-      - type: file
         path: org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+      - type: archive
+        path: source.tar.gz

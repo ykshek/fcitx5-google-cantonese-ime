@@ -99,20 +99,38 @@ install-flatpak-builder:
     flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
 
 flatpak-build: install-flatpak-builder
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source_archive=flatpak/source.tar.gz
+    trap 'rm -f "$source_archive"' EXIT
+    mkdir -p build
+    tar -czf "$source_archive" --transform='s,^,source/,' \
+        CMakeLists.txt LICENSE data src \
+        flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     flatpak run --command=flathub-build org.flatpak.Builder \
         --user --force-clean --disable-rofiles-fuse \
         --install-deps-from=flathub \
         --repo=build/flatpak-repo \
-        build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
-    test -f build/flatpak/files/app/addons/GoogleIME/lib/fcitx5/libfcitx5-google-ime.so
-    test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
-    test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
+        flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+    test -f builddir/files/lib/fcitx5/libfcitx5-google-ime.so
+    test -f builddir/files/share/fcitx5/addon/google-ime.conf
+    test -f builddir/files/share/fcitx5/inputmethod/google-ime.conf
+    test -f builddir/files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
 
 flatpak-install: install-flatpak-builder
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source_archive=flatpak/source.tar.gz
+    trap 'rm -f "$source_archive"' EXIT
+    mkdir -p build
+    tar -czf "$source_archive" --transform='s,^,source/,' \
+        CMakeLists.txt LICENSE data src \
+        flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     flatpak run --command=flathub-build org.flatpak.Builder \
         --user --install --force-clean --disable-rofiles-fuse \
         --install-deps-from=flathub \
-        build/flatpak-install flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+        --repo=build/flatpak-repo \
+        flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
 
 bump-version version:
     #!/usr/bin/env bash
