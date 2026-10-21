@@ -59,14 +59,16 @@ Then restart fcitx5 and enable "Google IME" (粵) in your input method list
 ### Fcitx5 Flatpak
 
 The repository includes a Flatpak add-on manifest targeting the Flathub
-`org.fcitx.Fcitx5` app. With Flatpak and the Flathub remote available, install
-the Flatpak-packaged builder, then build and install the extension for your user:
+`org.fcitx.Fcitx5` app. With Flatpak and the Flathub remote available, build
+and install the extension for your user:
 
 ```bash
-flatpak install --user flathub org.flatpak.Builder
 just flatpak-build
 just flatpak-install
 ```
+
+These recipes install the Flatpak-packaged `org.flatpak.Builder` if it is not
+already installed.
 
 The add-on is installed under the Fcitx5 Flatpak's extension point; it does not
 install files into the host's `/usr`. The Fcitx5 Flatpak must be installed and

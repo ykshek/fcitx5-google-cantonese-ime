@@ -95,7 +95,10 @@ rpm: build-container
     find rpmbuild/RPMS -name "*.rpm" -type f
     find rpmbuild/SRPMS -name "*.rpm" -type f
 
-flatpak-build:
+install-flatpak-builder:
+    flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
+
+flatpak-build: install-flatpak-builder
     flatpak run --command=flathub-build org.flatpak.Builder \
         --user --force-clean --disable-rofiles-fuse \
         --install-deps-from=flathub \
@@ -105,7 +108,7 @@ flatpak-build:
     test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
     test -f build/flatpak/files/app/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
 
-flatpak-install:
+flatpak-install: install-flatpak-builder
     flatpak run --command=flathub-build org.flatpak.Builder \
         --user --install --force-clean --disable-rofiles-fuse \
         --install-deps-from=flathub \
