@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.fcitx.Fcitx5.Addon.GoogleIME</id>
+  <extends>org.fcitx.Fcitx5</extends>
+  <name>Google IME</name>
+  <summary>Cantonese input method using Google Input Tools</summary>
+  <description>
+    <p>
+      An fcitx5 input method that sends romanized input to Google Input Tools
+      over HTTPS and displays the returned candidates. Network access is
+      required.
+    </p>
+  </description>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <developer id="io.github.ykshek">
+    <name>Alex Shek</name>
+  </developer>
+  <url type="homepage">https://github.com/ykshek/fcitx5-google-cantonese-ime</url>
+</component>

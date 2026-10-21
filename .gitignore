@@ -1,2 +1,3 @@
 build
 rpmbuild
+flatpak/source.tar.gz

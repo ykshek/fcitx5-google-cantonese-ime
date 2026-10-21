@@ -56,6 +56,26 @@ sudo dnf install fcitx5-google-cantonese-ime
 
 Then restart fcitx5 and enable "Google IME" (粵) in your input method list
 
+### Fcitx5 Flatpak
+
+The repository includes a Flatpak add-on manifest targeting the Flathub
+`org.fcitx.Fcitx5` app. With Flatpak and the Flathub remote available, build
+and install the extension for your user:
+
+```bash
+just flatpak-build
+just flatpak-install
+```
+
+These recipes install the Flatpak-packaged `org.flatpak.Builder` if it is not
+already installed.
+
+The add-on is installed under the Fcitx5 Flatpak's extension point; it does not
+install files into the host's `/usr`. The Fcitx5 Flatpak must be installed and
+running for the add-on to be loaded. The engine sends queries to Google Input
+Tools, so it requires the network permission already granted by the Fcitx5
+Flatpak.
+
 ### Build from source
 
 ```bash
@@ -79,7 +99,8 @@ curl "https://inputtools.google.com/request?text=nei&itc=yue-hant-t-i0-und&num=8
 
 ## Building
 
-`just` scripts are included to conveniently build in a containerized way using Podman:
+`just` scripts are included to conveniently build in a containerized way using Podman,
+or to build/install the Flatpak add-on with the Flatpak-packaged builder:
 
 ```bash
 just build-container   # build the Fedora dev container image
@@ -87,6 +108,8 @@ just build             # build the C++ plugin inside the container
 just build-local       # build locally (host must have the dev deps)
 just install           # install the .so + metadata into /usr
 just rpm               # build the RPM locally inside the container
+just flatpak-build     # build and verify the Fcitx5 Flatpak add-on
+just flatpak-install   # build and install the add-on for the current user
 ```
 
 ### Build dependencies

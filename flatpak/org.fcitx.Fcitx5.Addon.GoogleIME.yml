@@ -1,0 +1,48 @@
+id: org.fcitx.Fcitx5.Addon.GoogleIME
+branch: stable
+runtime: org.fcitx.Fcitx5
+runtime-version: stable
+sdk: org.kde.Sdk//6.11
+build-extension: true
+separate-locales: false
+build-options:
+  prefix: /app/addons/GoogleIME
+  prepend-ld-library-path: /app/addons/GoogleIME/lib
+modules:
+  - name: nlohmann-json
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DJSON_BuildTests=OFF
+      - -DJSON_MultipleHeaders=ON
+      - -DJSON_SystemInclude=ON
+    sources:
+      - type: archive
+        url: https://github.com/nlohmann/json/archive/v3.12.0.tar.gz
+        sha256: 4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187
+  - name: fcitx5-google-cantonese-ime
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DFCITX_INSTALL_USE_FCITX_SYS_PATHS=OFF
+      - -DCMAKE_PREFIX_PATH=/app/addons/GoogleIME;/app
+    cleanup:
+      - /include
+      - /lib/cmake
+      - /lib/pkgconfig
+      - /share/doc
+      - /share/man
+    sources:
+      - type: archive
+        path: source.tar.gz
+  - name: addon-metadata
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 LICENSE ${FLATPAK_DEST}/share/licenses/org.fcitx.Fcitx5.Addon.GoogleIME/LICENSE
+      - install -Dm644 org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml ${FLATPAK_DEST}/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+    sources:
+      - type: file
+        path: org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+      - type: archive
+        path: source.tar.gz
