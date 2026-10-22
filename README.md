@@ -156,6 +156,14 @@ to commit the raw romanization and continue, select the first fresh candidate
 candidates return), or stop accepting additional input until the preedit is
 shortened or cleared.
 
+The **When composition is reset** setting controls what happens to unfinished
+preedit when Fcitx5 resets the composition, including when switching away from
+the IME with Shift or Ctrl+Space. It defaults to **Commit raw preedit**; choose
+**Discard preedit** for the previous behavior, or **Select first candidate** to
+commit the first fresh candidate. If no fresh candidate is available, the raw
+preedit is committed instead; any romanization left over after a partial
+candidate is committed raw as well.
+
 Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
 | Layout | `itc` code |

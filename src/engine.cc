@@ -998,6 +998,30 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     auto *state = ic->propertyFor(&stateFactory_);
     if (!state) return;
 
+    if (!state->preedit.empty()) {
+        const std::string raw = state->preedit;
+        switch (config_.preeditResetBehavior.value()) {
+        case PreeditResetBehavior::CommitRaw:
+            ic->commitString(raw);
+            break;
+        case PreeditResetBehavior::Discard:
+            break;
+        case PreeditResetBehavior::SelectFirst:
+            if (candidatesFresh(state) && !state->candidates.empty()) {
+                const GoogleCandidate candidate = state->candidates.front();
+                ic->commitString(candidate.text);
+                const int consumed = std::clamp(
+                    candidate.matchedLength, 0, static_cast<int>(raw.size()));
+                const std::string remainder =
+                    raw.substr(static_cast<std::string::size_type>(consumed));
+                if (!remainder.empty()) ic->commitString(remainder);
+            } else {
+                ic->commitString(raw);
+            }
+            break;
+        }
+    }
+
     ++state->generation;
     state->preedit.clear();
     state->committed.clear();

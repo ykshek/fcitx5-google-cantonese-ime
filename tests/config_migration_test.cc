@@ -4,6 +4,20 @@
 
 int main() {
     {
+        GoogleIMEConfig config;
+        if (config.preeditResetBehavior.value() !=
+                PreeditResetBehavior::CommitRaw ||
+            PreeditResetBehaviorToString(PreeditResetBehavior::CommitRaw) !=
+                "Commit raw preedit" ||
+            PreeditResetBehaviorToString(PreeditResetBehavior::Discard) !=
+                "Discard preedit" ||
+            PreeditResetBehaviorToString(PreeditResetBehavior::SelectFirst) !=
+                "Select first candidate") {
+            return 5;
+        }
+    }
+
+    {
         fcitx::RawConfig raw;
         raw.setValueByPath("InputCode", "zh-t-i0-pinyin");
         if (!migrateLegacyInputCode(raw) ||

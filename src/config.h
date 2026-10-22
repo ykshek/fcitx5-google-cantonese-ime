@@ -52,10 +52,21 @@ enum class PreeditLimitBehavior {
     Stop,
 };
 
+enum class PreeditResetBehavior {
+    CommitRaw,
+    Discard,
+    SelectFirst,
+};
+
 FCITX_CONFIG_ENUM_NAME_WITH_I18N(PreeditLimitBehavior,
     N_("Commit raw preedit"),
     N_("Select first candidate"),
     N_("Stop accepting input"));
+
+FCITX_CONFIG_ENUM_NAME_WITH_I18N(PreeditResetBehavior,
+    N_("Commit raw preedit"),
+    N_("Discard preedit"),
+    N_("Select first candidate"));
 
 // Generates GoogleInputLayoutI18NAnnotation (dropdown labels) and the
 // marshall/unmarshall helpers (the label string is also the value persisted to
@@ -96,6 +107,12 @@ FCITX_CONFIGURATION(
         preeditLimitBehavior{this, "PreeditLimitBehavior",
                              _("When the preedit length limit is reached"),
                              PreeditLimitBehavior::CommitRaw};
+
+    fcitx::OptionWithAnnotation<PreeditResetBehavior,
+                                PreeditResetBehaviorI18NAnnotation>
+        preeditResetBehavior{this, "PreeditResetBehavior",
+                             _("When composition is reset"),
+                             PreeditResetBehavior::CommitRaw};
 )
 
 // Returns the itc code for a layout. For Custom, returns the user-supplied
