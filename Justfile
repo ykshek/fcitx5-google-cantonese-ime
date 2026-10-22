@@ -101,6 +101,9 @@ install-flatpak-builder:
 build-flatpak: install-flatpak-builder
     #!/usr/bin/env bash
     set -euo pipefail
+    rm -rf build
+    rm -rf builddir
+    rm -rf .flatpak-builder
     source_archive=flatpak/source.tar.gz
     trap 'rm -f "$source_archive"' EXIT
     mkdir -p build
@@ -120,6 +123,9 @@ build-flatpak: install-flatpak-builder
 install-flatpak: install-flatpak-builder
     #!/usr/bin/env bash
     set -euo pipefail
+    rm -rf build
+    rm -rf builddir
+    rm -rf .flatpak-builder
     source_archive=flatpak/source.tar.gz
     trap 'rm -f "$source_archive"' EXIT
     mkdir -p build
