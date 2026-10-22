@@ -153,6 +153,17 @@ bump-version version:
         exit 1
     fi
 
+    METADATA=flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+    RELEASE_DATE=$(date -u +%F)
+    if ! grep -q '^<component ' "$METADATA" || ! grep -q '</component>' "$METADATA"; then
+        echo "Error: Invalid AppStream metadata in $METADATA"
+        exit 1
+    fi
+    if grep -q "<release version=\"$VERSION\"" "$METADATA"; then
+        echo "Error: Version $VERSION already exists in $METADATA"
+        exit 1
+    fi
+
     # Update the version in the spec file
     echo "Updating version in fcitx5-google-cantonese-ime.spec..."
     sed -i "s/^Version:.*/Version:        $VERSION/" fcitx5-google-cantonese-ime.spec
@@ -160,6 +171,14 @@ bump-version version:
     # Update the version in CMakeLists.txt (project(... VERSION ...))
     echo "Updating version in CMakeLists.txt..."
     sed -i -E "s/(project\(fcitx5-google-cantonese-ime VERSION )[^ ]+/\1$VERSION/" CMakeLists.txt
+
+    # Record the Flatpak release in its AppStream metadata.
+    echo "Updating version in $METADATA..."
+    if grep -q '<releases>' "$METADATA"; then
+        sed -i "/<releases>/a\\    <release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>" "$METADATA"
+    else
+        sed -i "/<\/component>/i\\  <releases>\\n    <release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>\\n  </releases>" "$METADATA"
+    fi
 
     # Verify the changes were made
     if ! grep -q "^Version:[[:space:]]*$VERSION" fcitx5-google-cantonese-ime.spec; then
@@ -170,10 +189,14 @@ bump-version version:
         echo "Error: Failed to update version in CMakeLists.txt"
         exit 1
     fi
+    if ! grep -q "<release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>" "$METADATA"; then
+        echo "Error: Failed to update version in $METADATA"
+        exit 1
+    fi
 
-    echo "Version updated successfully in spec and CMakeLists.txt"
-    git diff fcitx5-google-cantonese-ime.spec CMakeLists.txt
-    git add fcitx5-google-cantonese-ime.spec CMakeLists.txt
+    echo "Version updated successfully in spec, CMakeLists.txt, and AppStream metadata"
+    git diff fcitx5-google-cantonese-ime.spec CMakeLists.txt "$METADATA"
+    git add fcitx5-google-cantonese-ime.spec CMakeLists.txt "$METADATA"
     git commit -m "chore: bump version to v$VERSION"
 
 commit version:
