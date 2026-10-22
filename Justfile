@@ -105,10 +105,10 @@ flatpak-build: install-flatpak-builder
     trap 'rm -f "$source_archive"' EXIT
     mkdir -p build
     tar -czf "$source_archive" --transform='s,^,source/,' \
-        CMakeLists.txt LICENSE data src \
+        CMakeLists.txt LICENSE data src tests \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     flatpak run --command=flathub-build org.flatpak.Builder \
-        --user --force-clean --disable-rofiles-fuse \
+        --user --force-clean --disable-cache --disable-rofiles-fuse \
         --install-deps-from=flathub \
         --repo=build/flatpak-repo \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
@@ -124,7 +124,7 @@ flatpak-install: install-flatpak-builder
     trap 'rm -f "$source_archive"' EXIT
     mkdir -p build
     tar -czf "$source_archive" --transform='s,^,source/,' \
-        CMakeLists.txt LICENSE data src \
+        CMakeLists.txt LICENSE data src tests \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     flatpak run --command=flathub-build org.flatpak.Builder \
         --user --install --force-clean --disable-rofiles-fuse \

@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -48,9 +49,9 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // sentence (i.e. by a previous candidate selection), used only as
     // prediction context sent to Google — see buildProbe(). Kept as a sliding
     // window of at most kMaxContextChars codepoints, matching what Google's
-    // own web client does. Reset whenever composition ends (Enter/Escape/
-    // punctuation-flush/focus change) since at that point there's no more
-    // "sentence" for Google to continue predicting from.
+    // own web client does. Reset when composition is explicitly cancelled or
+    // sentence-ending punctuation is committed; comma-like punctuation remains
+    // in context so Google can continue predicting within the same sentence.
     std::string committed;
 
     // Full candidate list returned by Google for the current query, together
@@ -136,6 +137,10 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // to avoid mis-committing raw preedit just because the network was a beat
     // slow. 0 = nothing pending.
     char pendingPunctuation = 0;
+
+    // One romanization character held while the "select first candidate"
+    // overflow policy waits for a fresh result.
+    std::string pendingRomanizedText;
 };
 
 // A minimal CandidateList that owns only the candidates for the CURRENT page.
@@ -151,6 +156,12 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
 // cursorIndex() returns the highlighted candidate so classicui highlights it;
 // selection still happens through MyCandidateWord::select() (number keys /
 // space are handled in keyEvent).
+class EmptyGoogleCandidateWord final : public fcitx::CandidateWord {
+public:
+    EmptyGoogleCandidateWord() : fcitx::CandidateWord(fcitx::Text{}) {}
+    void select(fcitx::InputContext *) const override {}
+};
+
 class GoogleIMECandidateList : public fcitx::CandidateList {
 public:
     GoogleIMECandidateList() = default;
@@ -159,7 +170,8 @@ public:
         const auto idx = static_cast<int>(words_.size());
         words_.push_back(std::move(word));
         // default labels: "1." "2." ... up to "9."
-        const char digit = (idx < 9) ? ('1' + idx) : '0';
+        const char digit =
+            (idx < 9) ? static_cast<char>('1' + idx) : '0';
         labels_.emplace_back(std::string(1, digit) + ".");
         if (idx == cursor) {
             cursorIndex_ = idx;
@@ -171,7 +183,10 @@ public:
     void setCursorIndex(int idx) { cursorIndex_ = idx; }
 
     const fcitx::CandidateWord &candidate(int idx) const override {
-        checkIndex(idx);
+        if (idx < 0 || idx >= static_cast<int>(words_.size())) {
+            static const EmptyGoogleCandidateWord empty;
+            return empty;
+        }
         return *words_[idx];
     }
 
@@ -190,11 +205,6 @@ public:
     }
 
 private:
-    void checkIndex(int idx) const {
-        if (idx < 0 || idx >= static_cast<int>(words_.size())) {
-            throw std::invalid_argument("GoogleIMECandidateList: invalid index");
-        }
-    }
     std::vector<std::unique_ptr<fcitx::CandidateWord>> words_;
     std::vector<fcitx::Text> labels_;
     int cursorIndex_ = -1;
@@ -259,6 +269,10 @@ public:
     // makes `text` independent of state->candidates.
     void selectCandidate(fcitx::InputContext *ic, std::string text,
                          int matchedLength);
+    void handleRomanizedChar(fcitx::InputContext *ic, GoogleIMEState *state,
+                             char c);
+    void resolvePendingRomanizedText(fcitx::InputContext *ic,
+                                     GoogleIMEState *state);
 
 private:
     // Candidate word. The display text MUST be handed to the
@@ -390,6 +404,11 @@ private:
     // it.
     std::vector<std::unique_ptr<fcitx::EventSource>> pendingEvents_;
     std::mutex pendingEventMutex_;
+    struct Worker {
+        std::thread thread;
+        std::shared_ptr<std::atomic_bool> done;
+    };
+    std::vector<Worker> workers_;
 
     // Debounce window (ms). A HAR capture of the official Google Input Tools
     // "try" page shows it issues one network request per keystroke with no

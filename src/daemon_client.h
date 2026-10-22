@@ -40,3 +40,7 @@ struct GoogleCandidate {
 std::vector<GoogleCandidate> get_candidates(const std::string& text,
                                             const std::string& itc = "yue-hant-t-i0-und",
                                             int num = 13);
+
+std::vector<GoogleCandidate>
+parse_candidates_response(const std::string& response,
+                          const std::string& itc = {});

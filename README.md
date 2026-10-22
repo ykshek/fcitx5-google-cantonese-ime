@@ -149,6 +149,13 @@ To change the layout:
 
 The chosen value is saved to `~/.config/fcitx5/conf/google-ime.conf` and takes effect on the next keystroke (an in-flight request for the previous layout is discarded, so switching layouts mid-composition never commits stale candidates). If **Custom** is selected but the code field is left blank, the engine falls back to the compiled-in Cantonese default.
 
+The same settings include **Preedit length limit (characters)** (default 64)
+and **When the preedit length limit is reached**. The available behaviors are
+to commit the raw romanization and continue, select the first fresh candidate
+(waiting for a lookup when necessary and falling back to raw romanization if no
+candidates return), or stop accepting additional input until the preedit is
+shortened or cleared.
+
 Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
 | Layout | `itc` code |
@@ -165,6 +172,7 @@ Built-in layouts and their `itc` codes (verified live against `https://inputtool
 
 - **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). A `kDebounceMs` (15 ms) debounce timer is reset on every keystroke; that is short enough to coalesce only genuinely-simultaneous events (e.g. IME engines that synthesize multiple key events per physical keystroke) while still firing effectively one request per real keystroke (matching observed Google behavior, where successive requests are ~50-120 ms apart). Stale in-flight responses are discarded via a per-input-context generation counter.
 - **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields does not corrupt the composition.
+- **Prediction context.** Comma-like punctuation (including `，` and `、`) remains in the context sent to Google; sentence-ending punctuation clears it.
 
 ## Notes
 

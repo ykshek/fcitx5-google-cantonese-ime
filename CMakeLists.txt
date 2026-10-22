@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(fcitx5-google-cantonese-ime VERSION 1.2.2 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CTest)
 
 # Default to /usr (not /usr/local) so a plain `cmake ..` builds an install tree
 # that matches the packaged RPM. Only overrides the default, untouched prefixes.
@@ -37,6 +38,8 @@ add_library(fcitx5-google-ime MODULE
 
 target_compile_features(fcitx5-google-ime PRIVATE cxx_std_17)
 target_include_directories(fcitx5-google-ime PRIVATE src)
+target_compile_options(fcitx5-google-ime PRIVATE
+    -Wall -Wextra -Wpedantic -Wconversion)
 
 target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core Fcitx5::Utils)
 if(TARGET CURL::libcurl)
@@ -52,6 +55,35 @@ endif()
 # When Fcitx5Core is found, enable the HAVE_FCITX5 define so engine.cc compiles.
 if(TARGET Fcitx5::Core)
     target_compile_definitions(fcitx5-google-ime PRIVATE HAVE_FCITX5=1)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(config_migration_test tests/config_migration_test.cc)
+    target_compile_features(config_migration_test PRIVATE cxx_std_17)
+    target_include_directories(config_migration_test PRIVATE src)
+    target_link_libraries(config_migration_test PRIVATE Fcitx5::Core Fcitx5::Utils)
+    target_compile_options(config_migration_test PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion)
+    add_test(NAME config_migration COMMAND config_migration_test)
+
+    add_executable(daemon_client_test
+        tests/daemon_client_test.cc
+        src/daemon_client.cc)
+    target_compile_features(daemon_client_test PRIVATE cxx_std_17)
+    target_include_directories(daemon_client_test PRIVATE src)
+    target_link_libraries(daemon_client_test PRIVATE Fcitx5::Utils)
+    if(TARGET CURL::libcurl)
+        target_link_libraries(daemon_client_test PRIVATE CURL::libcurl)
+    else()
+        target_include_directories(daemon_client_test PRIVATE ${CURL_INCLUDE_DIRS})
+        target_link_libraries(daemon_client_test PRIVATE ${CURL_LIBRARIES})
+    endif()
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(daemon_client_test PRIVATE nlohmann_json::nlohmann_json)
+    endif()
+    target_compile_options(daemon_client_test PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion)
+    add_test(NAME daemon_client COMMAND daemon_client_test)
 endif()
 
 # Generate addon/inputmethod metadata from .conf.in templates. configure_file

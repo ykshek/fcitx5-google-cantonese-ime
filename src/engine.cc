@@ -5,11 +5,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <thread>
 
 #include <fcitx-config/iniparser.h>  // readAsIni / safeSaveAsIni
+#include <fcitx-utils/log.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/candidatelist.h>
 #include <fcitx/event.h>
@@ -97,6 +97,10 @@ static std::string punctuationFor(char c, GoogleIMEState* state) {
     return out;
 }
 
+static bool endsSentence(char c) {
+    return c == '.' || c == '!' || c == '?';
+}
+
 void GoogleIMEEngine::MyCandidateWord::select(
     fcitx::InputContext *ic) const {
     // Mouse-click / keyboard selection both funnel through this one path,
@@ -174,7 +178,6 @@ void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
         // Invalidate any in-flight async results so a stale candidate list
         // cannot reappear after the user already selected a word.
         ++state->generation;
-        state->pendingPunctuation = 0;
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
@@ -188,13 +191,11 @@ void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
         if (ml > static_cast<int>(state->preedit.size()))
             ml = static_cast<int>(state->preedit.size());
         if (ml > 0) state->preedit.erase(0, ml);
-        state->candidates.clear();
-        state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
     }
     if (ic) {
-        ic->commitString(text);
+        if (!text.empty()) ic->commitString(text);
         if (!state || state->preedit.empty()) {
             // Composition consumed entirely (or no state): hide the panel but
             // KEEP committed context so the next word can use it as context.
@@ -207,6 +208,89 @@ void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
             // candidates.
             renderPanel(ic);
             scheduleRequest(ic, state);
+        }
+    }
+}
+
+void GoogleIMEEngine::handleRomanizedChar(fcitx::InputContext *ic,
+                                           GoogleIMEState *state, char c) {
+    const int limit = effectivePreeditLimit(config_.preeditLimit.value());
+    if (static_cast<int>(state->preedit.size()) >= limit) {
+        switch (config_.preeditLimitBehavior.value()) {
+        case PreeditLimitBehavior::CommitRaw: {
+            const std::string raw = state->preedit;
+            ++state->generation;
+            if (state->debounceTimer) state->debounceTimer.reset();
+            state->preedit.clear();
+            state->committed.clear();
+            state->candidates.clear();
+            state->candidatesProbe.clear();
+            state->page = 0;
+            state->cursor = 0;
+            if (!raw.empty()) ic->commitString(raw);
+            break;
+        }
+        case PreeditLimitBehavior::SelectFirst:
+            if (!state->candidates.empty() && candidatesFresh(state)) {
+                const auto candidate = state->candidates.front();
+                selectCandidate(ic, candidate.text, candidate.matchedLength);
+                state = ic->propertyFor(&stateFactory_);
+                if (!state) return;
+                if (static_cast<int>(state->preedit.size()) >= limit) {
+                    state->pendingRomanizedText.push_back(c);
+                    if (state->debounceTimer) state->debounceTimer.reset();
+                    lookupNow(ic, state);
+                    return;
+                }
+            } else {
+                state->pendingRomanizedText.push_back(c);
+                if (state->debounceTimer) state->debounceTimer.reset();
+                lookupNow(ic, state);
+                return;
+            }
+            break;
+        case PreeditLimitBehavior::Stop:
+            return;
+        }
+    }
+
+    state->preedit.push_back(c);
+    ++state->generation;
+    renderPanel(ic);
+    scheduleRequest(ic, state);
+}
+
+void GoogleIMEEngine::resolvePendingRomanizedText(fcitx::InputContext *ic,
+                                                   GoogleIMEState *state) {
+    if (state->pendingRomanizedText.empty()) return;
+    std::string pending = std::move(state->pendingRomanizedText);
+    state->pendingRomanizedText.clear();
+
+    if (!state->candidates.empty()) {
+        const auto candidate = state->candidates.front();
+        selectCandidate(ic, candidate.text, candidate.matchedLength);
+        state = ic->propertyFor(&stateFactory_);
+        if (!state) return;
+    } else {
+        const std::string raw = state->preedit;
+        ++state->generation;
+        if (state->debounceTimer) state->debounceTimer.reset();
+        state->preedit.clear();
+        state->committed.clear();
+        state->candidates.clear();
+        state->candidatesProbe.clear();
+        state->page = 0;
+        state->cursor = 0;
+        if (!raw.empty()) ic->commitString(raw);
+    }
+
+    for (size_t i = 0; i < pending.size(); ++i) {
+        handleRomanizedChar(ic, state, pending[i]);
+        state = ic->propertyFor(&stateFactory_);
+        if (!state) return;
+        if (!state->pendingRomanizedText.empty()) {
+            state->pendingRomanizedText.append(pending.substr(i + 1));
+            break;
         }
     }
 }
@@ -360,7 +444,12 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
         ic->commitString(committedText);
         ic->commitString(out);
         state->preedit.clear();
-        state->committed.clear();
+        if (endsSentence(pw)) state->committed.clear();
+        else {
+            state->committed += committedText;
+            state->committed += out;
+            trimCommitted(state);
+        }
         state->candidates.clear();
         state->candidatesProbe.clear();
         state->page = 0;
@@ -368,6 +457,18 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
         ic->inputPanel().reset();
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        return;
+    }
+
+    if (!state->pendingRomanizedText.empty()) {
+        resolvePendingRomanizedText(ic, state);
+        state = ic->propertyFor(&stateFactory_);
+        if (!state || !state->pendingRomanizedText.empty()) return;
+        if (state->pendingPunctuation) {
+            const char punctuation = state->pendingPunctuation;
+            state->pendingPunctuation = 0;
+            commitPunctuation(ic, state, punctuation);
+        }
         return;
     }
 
@@ -386,10 +487,13 @@ void GoogleIMEEngine::scheduleRequest(fcitx::InputContext *ic,
         fcitx::now(CLOCK_MONOTONIC);
     const uint64_t fire = now + kDebounceMs * 1000ULL;
 
+    auto icRef = ic->watch();
     state->debounceTimer = loop.addTimeEvent(
         CLOCK_MONOTONIC, fire, 1000,
-        [this, ic, gen = state->generation](fcitx::EventSourceTime *,
-                                           uint64_t) -> bool {
+        [this, icRef, gen = state->generation](fcitx::EventSourceTime *,
+                                               uint64_t) -> bool {
+            auto *ic = icRef.get();
+            if (!ic) return false;
             auto *st = ic ? ic->propertyFor(&stateFactory_) : nullptr;
             if (!st) return false;
             // Another keystroke may have arrived since this timer was armed;
@@ -457,6 +561,7 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
 
     auto *engine = this;
     auto &loop = instance_->eventLoop();
+    auto sendMutex = std::make_shared<std::mutex>();
 
     // Create the async event source on the main thread. Event sources must be
     // created/destroyed on the event-loop thread; only send() is safe to call
@@ -465,7 +570,7 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     // root cause of the "candidate list not updated until I press Down"
     // symptom (the deferred UI refresh was sometimes never scheduled).
     auto source = loop.addAsyncEvent(
-        [engine, result](fcitx::EventSource *src) -> bool {
+        [engine, result, sendMutex](fcitx::EventSource *src) -> bool {
             auto *ic = result->icRef.get();
             if (ic) {
                 try {
@@ -475,13 +580,14 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
                                            result->targetPage,
                                            result->configGen);
                 } catch (const std::exception &e) {
-                    std::cerr << "GoogleIMEEngine(applyCandidates): exception: "
-                              << e.what() << "\n";
+                    FCITX_WARN() << "GoogleIMEEngine(applyCandidates): "
+                                 << e.what();
                 } catch (...) {
-                    std::cerr << "GoogleIMEEngine(applyCandidates): unknown exception\n";
+                    FCITX_WARN() << "GoogleIMEEngine(applyCandidates): unknown exception";
                 }
             }
             // Self-remove from pendingEvents_ now that it has fired.
+            std::lock_guard<std::mutex> sendLock(*sendMutex);
             std::lock_guard<std::mutex> lk(engine->pendingEventMutex_);
             for (auto it = engine->pendingEvents_.begin();
                  it != engine->pendingEvents_.end(); ++it) {
@@ -499,23 +605,39 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
         pendingEvents_.push_back(std::move(source));
     }
 
+    if (!raw) return;
+
+    for (auto it = workers_.begin(); it != workers_.end();) {
+        if (it->done->load(std::memory_order_acquire)) {
+            if (it->thread.joinable()) it->thread.join();
+            it = workers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     // The HTTP GET blocks for ~100ms; do it on a worker thread so the main
     // event loop (and all of fcitx5's input handling) is never blocked.
-    std::thread worker([engine, result, raw, num]() {
+    auto done = std::make_shared<std::atomic_bool>(false);
+    std::thread worker([engine, result, raw, num, done, sendMutex]() {
         try {
             result->candidates =
                 get_candidates(result->probe, result->inputCode, num);
         } catch (const std::exception &e) {
-            std::cerr << "GoogleIMEEngine(worker): get_candidates exception: "
-                      << e.what() << "\n";
+            FCITX_WARN() << "GoogleIMEEngine(worker): get_candidates: "
+                         << e.what();
         } catch (...) {
-            std::cerr << "GoogleIMEEngine(worker): get_candidates unknown exception\n";
+            FCITX_WARN() << "GoogleIMEEngine(worker): unknown exception";
         }
         // Wake the main loop to apply the result. send() is the thread-safe
         // trigger; the callback above runs on the main thread.
-        if (raw) raw->send();
+        {
+            std::lock_guard<std::mutex> sendLock(*sendMutex);
+            raw->send();
+        }
+        done->store(true, std::memory_order_release);
     });
-    worker.detach();
+    workers_.push_back(Worker{std::move(worker), std::move(done)});
 }
 
 void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
@@ -533,6 +655,12 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     const fcitx::Key &key = keyEvent.key();
     const fcitx::KeySym sym = key.sym();
 
+    const fcitx::KeyStates mods = key.states();
+    const fcitx::KeyStates kModifierMask{
+        fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
+        fcitx::KeyState::Super, fcitx::KeyState::Hyper};
+    if (mods.testAny(kModifierMask)) return;
+
     // --- Resolve any pending deferred punctuation FIRST, before any branch
     // below mutates state->preedit ---
     // If a punctuation commit is waiting on an in-flight Google lookup
@@ -546,40 +674,34 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     // continue processing the current key against the now-clean state. The
     // generation bump also makes the original async response a no-op when
     // it eventually arrives.
-    if (state->pendingPunctuation != 0) {
+    if (state->pendingPunctuation != 0 &&
+        state->pendingRomanizedText.empty()) {
         const char pending = state->pendingPunctuation;
         const std::string raw = state->preedit;
         ++state->generation;
         if (state->debounceTimer) state->debounceTimer.reset();
         state->preedit.clear();
-        state->committed.clear();
+        if (endsSentence(pending)) state->committed.clear();
         state->candidates.clear();
         state->candidatesProbe.clear();
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
+        state->pendingRomanizedText.clear();
         if (!raw.empty()) ic->commitString(raw);
-        ic->commitString(punctuationFor(pending, state));
+        const std::string out = punctuationFor(pending, state);
+        ic->commitString(out);
+        if (!endsSentence(pending)) {
+            state->committed += raw;
+            state->committed += out;
+            trimCommitted(state);
+        }
         ic->inputPanel().reset();
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
         // Fall through: the current key is now handled against fresh state.
     }
 
-    // --- Modifier-guard: pass Ctrl/Alt/Super/Hyper combos straight through to
-    // the client. Without this, Ctrl+A (whose X11 keysym is the uppercase 'A')
-    // would fall into the printable-input branch below and push a capital 'A'
-    // into the romanization preedit — which was the root cause of "ctrl and
-    // alt keys write capital letters". We must NOT consume these events: the
-    // client almost always owns them (Ctrl+S to save, Ctrl+C to copy, ...),
-    // so returning without filter() lets them reach the client untouched.
-    const fcitx::KeyStates mods = key.states();
-    const fcitx::KeyStates kModifierMask{
-        fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
-        fcitx::KeyState::Super, fcitx::KeyState::Hyper};
-    if (mods.testAny(kModifierMask)) {
-        return;
-    }
     // --- Candidate navigation (only meaningful when there are candidates) ---
     if (!state->candidates.empty() && state->cursor >= 0) {
         const int perPage = kPageSize;
@@ -764,19 +886,11 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         return;
     }
     if (asciiPrintable) {
-        // Letters (and tone digits while composing) go to the preedit.
-        state->preedit.push_back(c);
-        ++state->generation;
-        // Intentionally do NOT clear state->candidates here: we want the old
-        // (now stale) list to stay visible as a best-effort preview while the
-        // new lookup is in flight, rather than making the panel flicker to empty
-        // on every keystroke. The generation guard in applyCandidates discards
-        // stale async results, and candidatesFresh() guards the selection paths
-        // from committing a candidate that's wrong for the current preedit.
-        // The panel re-renders immediately (so the new preedit character shows
-        // up at once); the list visually updates when the fresh response lands.
-        renderPanel(ic);
-        scheduleRequest(ic, state);
+        if (!state->pendingRomanizedText.empty()) {
+            state->pendingRomanizedText.push_back(c);
+        } else {
+            handleRomanizedChar(ic, state, c);
+        }
         keyEvent.filterAndAccept();
         return;
     }
@@ -784,6 +898,11 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     // --- Backspace: edit the preedit directly ---
     // Only intercept Backspace while we are actively composing; otherwise let
     // the client handle it (e.g. delete selected text in the editor).
+    if (sym == FcitxKey_BackSpace && !state->pendingRomanizedText.empty()) {
+        state->pendingRomanizedText.pop_back();
+        keyEvent.filterAndAccept();
+        return;
+    }
     if (sym == FcitxKey_BackSpace && !state->preedit.empty()) {
         state->preedit.pop_back();
         ++state->generation;
@@ -821,6 +940,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
+        state->pendingRomanizedText.clear();
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
@@ -841,6 +961,7 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         state->page = 0;
         state->cursor = 0;
         state->pendingPunctuation = 0;
+        state->pendingRomanizedText.clear();
         if (state->debounceTimer) {
             state->debounceTimer.reset();
         }
@@ -887,6 +1008,7 @@ void GoogleIMEEngine::reset(const fcitx::InputMethodEntry &entry,
     state->page = 0;
     state->cursor = 0;
     state->pendingPunctuation = 0;
+    state->pendingRomanizedText.clear();
     if (state->debounceTimer) {
         state->debounceTimer.reset();
     }
@@ -916,15 +1038,17 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
     // form. Each emit path below computes `out` for itself at emit time.
 
     if (state->preedit.empty()) {
-        // No composition active: emit the punctuation directly. Punctuation
-        // conventionally ends a sentence, so we deliberately clear the
-        // committed prediction context here (below) rather than keep it
-        // across the punctuation — the next composition should start a fresh
-        // context, not continue predicting off the pre-punctuation sentence.
+        // No composition active: emit punctuation directly. Sentence-ending
+        // punctuation clears prediction context; comma-like punctuation stays
+        // in context so the next word continues the same sentence.
         const std::string out = punctuationFor(halfWidth, state);
         ic->commitString(out);
         ++state->generation;
-        state->committed.clear();
+        if (endsSentence(halfWidth)) state->committed.clear();
+        else {
+            state->committed += out;
+            trimCommitted(state);
+        }
         state->candidates.clear();
         state->candidatesProbe.clear();
         state->page = 0;
@@ -968,7 +1092,13 @@ void GoogleIMEEngine::commitPunctuation(fcitx::InputContext *ic,
         const std::string out = punctuationFor(halfWidth, state);
         ic->commitString(out);
         state->preedit.clear();
-        state->committed.clear();
+        if (endsSentence(halfWidth)) state->committed.clear();
+        else {
+            state->committed += picked.text;
+            state->committed += remainder;
+            state->committed += out;
+            trimCommitted(state);
+        }
         state->candidates.clear();
         state->candidatesProbe.clear();
         state->page = 0;
@@ -1003,7 +1133,13 @@ GoogleIMEEngine::GoogleIMEEngine(fcitx::Instance *instance) : instance_(instance
     reloadConfig();
 }
 
-GoogleIMEEngine::~GoogleIMEEngine() = default;
+GoogleIMEEngine::~GoogleIMEEngine() {
+    // Workers use the engine-owned async sources and callback. Join them before
+    // member destruction so no worker can call send() after those sources die.
+    for (auto &worker : workers_) {
+        if (worker.thread.joinable()) worker.thread.join();
+    }
+}
 
 void GoogleIMEEngine::reloadConfig() {
     // readAsIni resolves "conf/google-ime.conf" against fcitx5's PkgConfig
@@ -1018,15 +1154,7 @@ void GoogleIMEEngine::reloadConfig() {
     // user who had configured e.g. pinyin would be silently reset to Cantonese.
     fcitx::RawConfig raw;
     readAsIni(raw, configFile);
-    const std::string *legacy = raw.valueByPath("InputCode");
-    if (legacy && !legacy->empty() && !raw.valueByPath("Layout")) {
-        GoogleInputLayout l = googleLayoutFromItc(*legacy);
-        raw.setValueByPath("Layout", GoogleInputLayoutToString(l));
-        if (l == GoogleInputLayout::Custom) {
-            // Unknown code: keep it as the Custom value so the user can edit it.
-            raw.setValueByPath("CustomInputCode", *legacy);
-        }
-        raw.setValueByPath("InputCode", "");  // drop the legacy key
+    if (migrateLegacyInputCode(raw)) {
         safeSaveAsIni(raw, configFile);
     }
     config_.load(raw, false);

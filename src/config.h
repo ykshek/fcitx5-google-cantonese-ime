@@ -46,6 +46,17 @@ enum class GoogleInputLayout {
     Custom,          // customInputCode
 };
 
+enum class PreeditLimitBehavior {
+    CommitRaw,
+    SelectFirst,
+    Stop,
+};
+
+FCITX_CONFIG_ENUM_NAME_WITH_I18N(PreeditLimitBehavior,
+    N_("Commit raw preedit"),
+    N_("Select first candidate"),
+    N_("Stop accepting input"));
+
 // Generates GoogleInputLayoutI18NAnnotation (dropdown labels) and the
 // marshall/unmarshall helpers (the label string is also the value persisted to
 // the config file, so google-ime.conf stays human-readable).
@@ -76,6 +87,15 @@ FCITX_CONFIGURATION(
         _("Custom itc= code (used only when "
           "Layout is Custom)"),
         "yue-hant-t-i0-und"};
+
+    fcitx::Option<int> preeditLimit{
+        this, "PreeditLimit", _("Preedit length limit (characters)"), 64};
+
+    fcitx::OptionWithAnnotation<PreeditLimitBehavior,
+                                PreeditLimitBehaviorI18NAnnotation>
+        preeditLimitBehavior{this, "PreeditLimitBehavior",
+                             _("When the preedit length limit is reached"),
+                             PreeditLimitBehavior::CommitRaw};
 )
 
 // Returns the itc code for a layout. For Custom, returns the user-supplied
@@ -109,4 +129,21 @@ inline GoogleInputLayout googleLayoutFromItc(const std::string &code) {
     if (code == "zh-t-i0-wubi-1986") return GoogleInputLayout::Wubi;
     if (code == "zh-hant-t-i0-cangjie-1982") return GoogleInputLayout::Cangjie;
     return GoogleInputLayout::Custom;
+}
+
+inline bool migrateLegacyInputCode(fcitx::RawConfig &raw) {
+    const std::string *legacy = raw.valueByPath("InputCode");
+    if (!legacy || legacy->empty() || raw.valueByPath("Layout")) return false;
+
+    const GoogleInputLayout layout = googleLayoutFromItc(*legacy);
+    raw.setValueByPath("Layout", GoogleInputLayoutToString(layout));
+    if (layout == GoogleInputLayout::Custom) {
+        raw.setValueByPath("CustomInputCode", *legacy);
+    }
+    raw.setValueByPath("InputCode", "");
+    return true;
+}
+
+inline int effectivePreeditLimit(int configuredLimit) {
+    return configuredLimit > 0 ? configuredLimit : 64;
 }
