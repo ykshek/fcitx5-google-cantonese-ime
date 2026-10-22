@@ -98,7 +98,7 @@ rpm: build-container
 install-flatpak-builder:
     flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
 
-flatpak-build: install-flatpak-builder
+build-flatpak: install-flatpak-builder
     #!/usr/bin/env bash
     set -euo pipefail
     source_archive=flatpak/source.tar.gz
@@ -117,7 +117,7 @@ flatpak-build: install-flatpak-builder
     test -f builddir/files/share/fcitx5/inputmethod/google-ime.conf
     test -f builddir/files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
 
-flatpak-install: install-flatpak-builder
+install-flatpak: install-flatpak-builder
     #!/usr/bin/env bash
     set -euo pipefail
     source_archive=flatpak/source.tar.gz

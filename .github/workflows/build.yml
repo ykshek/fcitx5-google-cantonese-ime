@@ -47,6 +47,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=/usr
             make -j$(nproc)
+            ctest --test-dir . --output-on-failure
           '
 
     - name: Test RPM build
@@ -93,7 +94,7 @@ jobs:
       run: |
         mkdir -p build
         tar -czf flatpak/source.tar.gz --transform='s,^,source/,' \
-          CMakeLists.txt LICENSE data src \
+          CMakeLists.txt LICENSE data src tests \
           flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
         flatpak-builder --user --force-clean --disable-rofiles-fuse \
           --install-deps-from=flathub \

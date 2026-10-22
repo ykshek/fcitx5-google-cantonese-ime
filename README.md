@@ -63,8 +63,8 @@ The repository includes a Flatpak add-on manifest targeting the Flathub
 and install the extension for your user:
 
 ```bash
-just flatpak-build
-just flatpak-install
+just build-flatpak
+just install-flatpak
 ```
 
 These recipes install the Flatpak-packaged `org.flatpak.Builder` if it is not

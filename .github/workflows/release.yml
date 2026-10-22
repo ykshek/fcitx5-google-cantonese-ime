@@ -1,4 +1,4 @@
-name: Build and Release RPM
+name: Build and Release RPM and Flatpak
 
 on:
   push:
@@ -26,10 +26,17 @@ jobs:
     - name: Set up variables
       id: vars
       run: |
-        # Extract version from tag (remove 'v' prefix)
-        VERSION=${GITHUB_REF#refs/tags/v}
+        # Use the pushed version tag, or the project version for manual runs.
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+          TAG=${GITHUB_REF#refs/tags/}
+        else
+          VERSION=$(sed -nE 's/^project\(fcitx5-google-cantonese-ime VERSION ([^ )]+).*/\1/p' CMakeLists.txt)
+          TAG="v$VERSION"
+        fi
+        test -n "$VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
 
         # Generate release name
         echo "release_name=fcitx5-google-cantonese-ime $VERSION" >> $GITHUB_OUTPUT
@@ -82,6 +89,36 @@ jobs:
         find rpmbuild/RPMS -name "*.rpm" -type f
         find rpmbuild/SRPMS -name "*.rpm" -type f
 
+    - name: Install Flatpak build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y flatpak flatpak-builder
+
+    - name: Install Flatpak build runtimes
+      run: |
+        flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        flatpak install --user --noninteractive --assumeyes flathub \
+          org.kde.Sdk//6.11 \
+          org.fcitx.Fcitx5//stable
+
+    - name: Build Flatpak extension
+      run: |
+        set -euo pipefail
+        source_archive=flatpak/source.tar.gz
+        trap 'rm -f "$source_archive"' EXIT
+        mkdir -p build
+        tar -czf "$source_archive" --transform='s,^,source/,' \
+          CMakeLists.txt LICENSE data src tests \
+          flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+        flatpak-builder --user --force-clean --disable-rofiles-fuse \
+          --install-deps-from=flathub \
+          --repo=build/flatpak-repo \
+          build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+        test -f build/flatpak/files/lib/fcitx5/libfcitx5-google-ime.so
+        test -f build/flatpak/files/share/fcitx5/addon/google-ime.conf
+        test -f build/flatpak/files/share/fcitx5/inputmethod/google-ime.conf
+        test -f build/flatpak/files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+
     - name: Prepare release artifacts
       run: |
         mkdir -p release-artifacts
@@ -90,9 +127,16 @@ jobs:
         find rpmbuild/RPMS -name "*.rpm" -type f -exec cp {} release-artifacts/ \;
         find rpmbuild/SRPMS -name "*.rpm" -type f -exec cp {} release-artifacts/ \;
 
+        # Export the Flatpak extension as an installable single-file bundle.
+        flatpak build-bundle --runtime --arch=x86_64 \
+          --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+          build/flatpak-repo \
+          "release-artifacts/org.fcitx.Fcitx5.Addon.GoogleIME-${{ steps.vars.outputs.version }}-x86_64.flatpak" \
+          org.fcitx.Fcitx5.Addon.GoogleIME stable
+
         # Create checksums
         cd release-artifacts
-        sha256sum *.rpm > SHA256SUMS
+        sha256sum *.rpm *.flatpak > SHA256SUMS
         cd ..
 
         # List artifacts
@@ -113,8 +157,19 @@ jobs:
         sudo dnf install fcitx5-google-cantonese-ime-*.rpm
         \`\`\`
 
+        ## Installation (Fcitx5 Flatpak)
+
+        Download the Flatpak extension bundle and install it for your user:
+
+        \`\`\`bash
+        flatpak install --user ./org.fcitx.Fcitx5.Addon.GoogleIME-${{ steps.vars.outputs.version }}-x86_64.flatpak
+        \`\`\`
+
+        The Fcitx5 Flatpak runtime from Flathub must be installed. Restart Fcitx5
+        and enable the Google IME add-on/input method after installation.
+
         After installing, restart fcitx5 and add the "Google IME" (粵) input
-        method in the fcitx5 configuration tool:
+        method in the fcitx5 configuration tool (RPM installation):
 
         \`\`\`bash
         fcitx5 -r -d
@@ -137,6 +192,7 @@ jobs:
         body_path: release_notes.md
         files: |
           release-artifacts/*.rpm
+          release-artifacts/*.flatpak
           release-artifacts/SHA256SUMS
         draft: false
         prerelease: false
