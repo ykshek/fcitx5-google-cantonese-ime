@@ -13,10 +13,12 @@ env:
 jobs:
   build-devcontainer:
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       contents: read
       packages: write
+
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
 
     steps:
     - name: Checkout code
@@ -55,8 +57,10 @@ jobs:
 
   build-rpm:
     runs-on: ubuntu-latest
+    needs: build-devcontainer
     permissions:
       contents: read
+      packages: read
 
     steps:
     - name: Checkout code
@@ -83,21 +87,23 @@ jobs:
           > "rpmbuild/SOURCES/v${{ steps.vars.outputs.version }}.tar.gz"
         cp fcitx5-google-cantonese-ime.spec rpmbuild/SPECS/
 
-    - name: Build RPM in Fedora
+    - name: Log in to Container Registry
+      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build RPM in development container
       run: |
         docker run --rm \
           --volume "$(pwd):/workspace" \
           --workdir /workspace \
-          quay.io/fedora/fedora:latest \
-          bash -euo pipefail -c '
-            dnf5 -y install \
-              cmake gcc-c++ make git libcurl-devel json-devel \
-              pkgconf-pkg-config fcitx5-devel extra-cmake-modules \
-              rpm-build rpmdevtools gawk
-            rpmbuild --define "_topdir /workspace/rpmbuild" \
-                     --define "version ${{ steps.vars.outputs.version }}" \
-                     -ba rpmbuild/SPECS/fcitx5-google-cantonese-ime.spec
-          '
+          "${{ needs.build-devcontainer.outputs.image_tag }}" \
+          bash -euo pipefail -c \
+            'rpmbuild --define "_topdir /workspace/rpmbuild" \
+                      --define "version ${{ steps.vars.outputs.version }}" \
+                      -ba rpmbuild/SPECS/fcitx5-google-cantonese-ime.spec'
 
     - name: Upload RPM artifacts
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
