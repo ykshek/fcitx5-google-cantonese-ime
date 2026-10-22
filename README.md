@@ -1,6 +1,12 @@
+## Deprecated
+
+Use rime with https://github.com/rime/rime-jyutping instead. It provides a similar Cantonese typing experience without the need to send your texts online!
+
 ## Warning
 
-This is a mostly vibe-coded slop project. Code quality is not guaranteed and has the possibility of going down the drain.
+~~This is a mostly vibe-coded slop project. Code quality is not guaranteed and has the possibility of going down the drain.~~
+
+This project is now abandoned because I found out that rime-jyutping exists.
 
 This IME thingamajig makes HTTPS requests to Google Input Tools to send your inputs through the Internet to Google, and will come with all the caveats of that (latency, privacy, and dependence on a third-party endpoint you don't control).
 
