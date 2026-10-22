@@ -7,7 +7,7 @@ build-extension: true
 separate-locales: false
 build-options:
   prefix: /app/addons/GoogleIME
-  prepend-ld-library-path: /app/addons/GoogleIME/lib
+  prepend-ld-library-path: /app/addons/GoogleIME/lib64
 modules:
   - name: nlohmann-json
     buildsystem: cmake-ninja

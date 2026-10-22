@@ -115,10 +115,10 @@ build-flatpak: install-flatpak-builder
         --install-deps-from=flathub \
         --repo=build/flatpak-repo \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
-    test -f builddir/files/lib/fcitx5/libfcitx5-google-ime.so
-    test -f builddir/files/share/fcitx5/addon/google-ime.conf
-    test -f builddir/files/share/fcitx5/inputmethod/google-ime.conf
-    test -f builddir/files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+    test -f builddir/files/addons/GoogleIME/lib64/fcitx5/libfcitx5-google-ime.so
+    test -f builddir/files/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
+    test -f builddir/files/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
+    test -f builddir/files/addons/GoogleIME/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
 
 install-flatpak: install-flatpak-builder
     #!/usr/bin/env bash

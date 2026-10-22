@@ -101,10 +101,10 @@ jobs:
           --repo=build/flatpak-repo \
           build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
         rm -f flatpak/source.tar.gz
-        test -f build/flatpak/files/lib/fcitx5/libfcitx5-google-ime.so
-        test -f build/flatpak/files/share/fcitx5/addon/google-ime.conf
-        test -f build/flatpak/files/share/fcitx5/inputmethod/google-ime.conf
-        test -f build/flatpak/files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+        test -f build/flatpak/files/addons/GoogleIME/lib64/fcitx5/libfcitx5-google-ime.so
+        test -f build/flatpak/files/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
+        test -f build/flatpak/files/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
+        test -f build/flatpak/files/addons/GoogleIME/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
 
     - name: Upload build artifacts
       if: always()
