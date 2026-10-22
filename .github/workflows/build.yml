@@ -15,23 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
     - name: Checkout code
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-    - name: Log in to Container Registry
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
     - name: Build development container
-      run: |
-        docker build -t localhost/fcitx5-google-cantonese-ime:dev -f Containerfile .
+      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      with:
+        context: .
+        file: Containerfile
+        tags: localhost/fcitx5-google-cantonese-ime:dev
+        load: true
+        cache-from: type=gha,scope=fcitx5-devcontainer
+        cache-to: type=gha,mode=max,scope=fcitx5-devcontainer
 
     - name: Build project
       run: |
@@ -78,6 +78,25 @@ jobs:
         find rpmbuild/RPMS -name "*.rpm" -type f
         find rpmbuild/SRPMS -name "*.rpm" -type f
 
+    - name: Upload RPM build artifacts
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: build-rpm-artifacts
+        path: |
+          rpmbuild/RPMS/
+          rpmbuild/SRPMS/
+        retention-days: 7
+
+  build-flatpak:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
     - name: Install Flatpak build tools
       run: |
         sudo apt-get update
@@ -92,15 +111,17 @@ jobs:
 
     - name: Build and verify Flatpak add-on
       run: |
+        set -euo pipefail
         mkdir -p build
-        tar -czf flatpak/source.tar.gz --transform='s,^,source/,' \
+        source_archive=flatpak/source.tar.gz
+        trap 'rm -f "$source_archive"' EXIT
+        tar -czf "$source_archive" --transform='s,^,source/,' \
           CMakeLists.txt LICENSE data src tests \
           flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
         flatpak-builder --user --force-clean --disable-rofiles-fuse \
           --install-deps-from=flathub \
           --repo=build/flatpak-repo \
           build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
-        rm -f flatpak/source.tar.gz
         flatpak_files=build/flatpak/files
         if [[ ! -f "$flatpak_files/lib/fcitx5/libfcitx5-google-ime.so" ]]; then
           echo "Error: Flatpak add-on library was not installed under lib/fcitx5"
@@ -111,13 +132,11 @@ jobs:
         test -f "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
         test -f "$flatpak_files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml"
 
-    - name: Upload build artifacts
+    - name: Upload Flatpak build artifacts
       if: always()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
-        name: build-artifacts
-        path: |
-          build/flatpak-repo/
-          rpmbuild/RPMS/
-          rpmbuild/SRPMS/
+        name: build-flatpak-artifacts
+        path: build/flatpak-repo/
+        if-no-files-found: ignore
         retention-days: 7
