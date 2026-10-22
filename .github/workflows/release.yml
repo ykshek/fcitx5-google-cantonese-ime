@@ -114,10 +114,15 @@ jobs:
           --install-deps-from=flathub \
           --repo=build/flatpak-repo \
           build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
-        test -f build/flatpak/files/addons/GoogleIME/lib64/fcitx5/libfcitx5-google-ime.so
-        test -f build/flatpak/files/addons/GoogleIME/share/fcitx5/addon/google-ime.conf
-        test -f build/flatpak/files/addons/GoogleIME/share/fcitx5/inputmethod/google-ime.conf
-        test -f build/flatpak/files/addons/GoogleIME/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
+        flatpak_files=build/flatpak/files
+        if [[ ! -f "$flatpak_files/lib/fcitx5/libfcitx5-google-ime.so" && \
+              ! -f "$flatpak_files/lib64/fcitx5/libfcitx5-google-ime.so" ]]; then
+          echo "Error: Flatpak add-on library was not installed under lib or lib64"
+          exit 1
+        fi
+        test -f "$flatpak_files/share/fcitx5/addon/google-ime.conf"
+        test -f "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
+        test -f "$flatpak_files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml"
 
     - name: Prepare release artifacts
       run: |
