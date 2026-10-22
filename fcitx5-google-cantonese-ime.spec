@@ -1,5 +1,5 @@
 Name:           fcitx5-google-cantonese-ime
-Version:        1.3.4
+Version:        1.4.0
 Release:        1%{?dist}
 Summary:        fcitx5 Cantonese input method backed by Google Input Tools
 
