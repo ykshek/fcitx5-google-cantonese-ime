@@ -7,7 +7,7 @@ build-extension: true
 separate-locales: false
 build-options:
   prefix: /app/addons/GoogleIME
-  prepend-ld-library-path: /app/addons/GoogleIME/lib:/app/addons/GoogleIME/lib64
+  prepend-ld-library-path: /app/addons/GoogleIME/lib
 modules:
   - name: nlohmann-json
     buildsystem: cmake-ninja
@@ -26,6 +26,7 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DFCITX_INSTALL_USE_FCITX_SYS_PATHS=OFF
+      - -DCMAKE_INSTALL_LIBDIR=lib
       - -DCMAKE_PREFIX_PATH=/app/addons/GoogleIME;/app
     cleanup:
       - /include

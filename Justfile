@@ -116,11 +116,11 @@ build-flatpak: install-flatpak-builder
         --repo=build/flatpak-repo \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
     flatpak_files=builddir/files
-    if [[ ! -f "$flatpak_files/lib/fcitx5/libfcitx5-google-ime.so" && \
-          ! -f "$flatpak_files/lib64/fcitx5/libfcitx5-google-ime.so" ]]; then
-        echo "Error: Flatpak add-on library was not installed under lib or lib64"
+    if [[ ! -f "$flatpak_files/lib/fcitx5/libfcitx5-google-ime.so" ]]; then
+        echo "Error: Flatpak add-on library was not installed under lib/fcitx5"
         exit 1
     fi
+    test ! -e "$flatpak_files/lib64/fcitx5/libfcitx5-google-ime.so"
     test -f "$flatpak_files/share/fcitx5/addon/google-ime.conf"
     test -f "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
     test -f "$flatpak_files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml"
