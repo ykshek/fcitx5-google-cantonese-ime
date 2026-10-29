@@ -115,3 +115,6 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/data/inputmethod/google-ime.conf
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/inputmethod)
 install(FILES data/icons/google-ime.svg
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/imicon)
+install(FILES data/icons/google-ime.svg
+        DESTINATION ${FCITX_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME ykshekGoogleIME.svg)
