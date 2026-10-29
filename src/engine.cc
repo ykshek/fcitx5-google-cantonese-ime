@@ -405,7 +405,8 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
     // in-flight response arrived. Resolve it now and then emit the
     // punctuation. This prevents committing raw romanization just because the
     // network was a beat slow (e.g. "nei," -> "你，" rather than "nei，").
-    if (state->pendingPunctuation) {
+    if (state->pendingPunctuation &&
+        state->pendingRomanizedText.empty()) {
         char pw = state->pendingPunctuation;
         std::string out = punctuationFor(pw, state);
         state->pendingPunctuation = 0;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <fcitx-utils/log.h>
 #include <limits>
@@ -65,9 +66,10 @@ size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
 // A pool lets concurrent requests run in parallel while still reusing warmed
 // connections once they are returned to the pool.
 //
-// Thread-safety: the pool vector and its idle count are guarded by a mutex.
-// Each worker thread checks out one handle for the duration of curl_easy_perform
-// and returns it to the idle pool when done (RAII via PooledHandle below).
+// Thread-safety: the pool vector and its handle count are guarded by a mutex.
+// Each worker checks out one handle for curl_easy_perform and returns it to
+// the idle pool when done. If every handle is busy, callers wait for a release
+// instead of treating pool saturation as an empty candidate response.
 //
 // Concurrent handles are capped as well as idle handles, so a slow endpoint
 // cannot cause this IME to open an unbounded number of connections.
@@ -118,17 +120,17 @@ public:
     }
 
     CURL* acquire() {
-        std::lock_guard<std::mutex> lk(mutex_);
+        std::unique_lock<std::mutex> lk(mutex_);
+        available_.wait(lk, [this] {
+            return !idle_.empty() || total_ < kMaxTotal;
+        });
         if (!idle_.empty()) {
             CURL* handle = idle_.back();
             idle_.pop_back();
             return handle;
         }
-        if (total_ >= kMaxTotal) return nullptr;
-        // All pooled handles are busy: create a new one so this request can run
-        // in parallel rather than waiting. curl_easy_init may return null on a
-        // truly catastrophic failure (out of memory), which the caller handles
-        // by treating it as an empty result.
+        // All pooled handles were busy; the wait above ensures capacity is
+        // available here. curl_easy_init can still fail on resource exhaustion.
         CURL* handle = curl_easy_init();
         if (handle) {
             applyStaticOptions(handle);
@@ -156,6 +158,7 @@ public:
         } else {
             idle_.push_back(handle);
         }
+        available_.notify_one();
     }
 
     ~CurlHandlePool() {
@@ -170,6 +173,7 @@ private:
     std::vector<CURL*> idle_;
     size_t total_ = 0;
     std::mutex mutex_;
+    std::condition_variable available_;
 };
 
 // Singleton pool. Intentionally never destroyed: a function-local static
