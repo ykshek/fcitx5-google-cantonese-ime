@@ -11,7 +11,7 @@
 //
 // The addon metadata (data/addon/google-ime.conf.in) sets Configurable=True, so
 // fcitx5's configuration GUI — fcitx5-configtool, or the KDE Plasma Settings
-// "Input Method" module (kcm_fcitx5) on Fedora / KDE Plasma — calls the
+// "Input Method" module (kcm_fcitx5) in KDE Plasma — calls the
 // engine's getConfig() / setConfig() / reloadConfig() overrides (see
 // GoogleIMEEngine in engine.h). fcitx5 introspects the Option members declared
 // here and generates the matching UI controls automatically; there is no

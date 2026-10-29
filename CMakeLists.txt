@@ -5,7 +5,7 @@ include(GNUInstallDirs)
 include(CTest)
 
 # Default to /usr (not /usr/local) so a plain `cmake ..` builds an install tree
-# that matches the packaged RPM. Only overrides the default, untouched prefixes.
+# that matches the Fcitx5 installation. Only overrides the default, untouched prefixes.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
 endif()
@@ -17,10 +17,9 @@ find_package(Fcitx5Core REQUIRED)
 include("${FCITX_INSTALL_CMAKECONFIG_DIR}/Fcitx5Utils/Fcitx5CompilerSettings.cmake")
 find_package(CURL REQUIRED)
 
-# nlohmann/json for parsing Google Input Tools responses. Prefer a system
-# package (e.g. Fedora's json-devel / Debian's nlohmann-json3-dev) when
-# available; otherwise fetch the single-header release from GitHub at configure
-# time. FetchContent requires git and network access during the cmake step.
+# nlohmann/json for parsing Google Input Tools responses. Prefer a system package
+# when available; otherwise fetch the release from GitHub at configure time.
+# FetchContent requires git and network access during the cmake step.
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
     include(FetchContent)
@@ -88,7 +87,7 @@ endif()
 
 # Generate addon/inputmethod metadata from .conf.in templates. configure_file
 # substitutes @PROJECT_VERSION@ so the addon Version field stays in sync with the
-# project (and the RPM) version. The generated .conf files live in the build tree
+# project version. The generated .conf files live in the build tree
 # and are the only metadata installed, so the source tree ships templates only.
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/addon/google-ime.conf.in
                ${CMAKE_CURRENT_BINARY_DIR}/data/addon/google-ime.conf @ONLY)
