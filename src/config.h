@@ -5,6 +5,7 @@
 #include <fcitx-config/option.h>          // Option, OptionWithAnnotation
 #include <fcitx-utils/i18n.h>             // N_() / _() for dropdown labels
 
+#include <algorithm>
 #include <string>
 
 // User-configurable options for the Google IME addon.
@@ -99,6 +100,10 @@ FCITX_CONFIGURATION(
           "Layout is Custom)"),
         "yue-hant-t-i0-und"};
 
+    fcitx::Option<int, fcitx::IntConstrain> candidateListSize{
+        this, "CandidateListSize", _("Candidates per page (1-9)"), 9,
+        fcitx::IntConstrain(1, 9)};
+
     fcitx::Option<int> preeditLimit{
         this, "PreeditLimit", _("Preedit length limit (characters)"), 64};
 
@@ -163,4 +168,8 @@ inline bool migrateLegacyInputCode(fcitx::RawConfig &raw) {
 
 inline int effectivePreeditLimit(int configuredLimit) {
     return configuredLimit > 0 ? configuredLimit : 64;
+}
+
+inline int effectiveCandidateListSize(int configuredSize) {
+    return std::clamp(configuredSize, 1, 9);
 }

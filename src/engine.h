@@ -22,10 +22,8 @@
 #include <vector>
 
 #include "config.h"        // GoogleIMEConfig (user-configurable itc layout)
+#include "candidate_paging.h"
 #include "daemon_client.h"  // GoogleCandidate
-
-// Number of candidates shown per page in the candidate panel.
-inline constexpr int kPageSize = 9;
 
 // Per-InputContext composing state. This is the single source of truth for
 // everything the engine renders: the preedit (raw romanized buffer still
@@ -56,8 +54,8 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
 
     // Full candidate list returned by Google for the current query, together
     // with how many bytes of `preedit` (from the front) each one consumes.
-    // The panel renders a kPageSize-wide window into this vector starting at
-    // `page * kPageSize`.
+    // The panel renders a configured-width window into this vector starting at
+    // `page * visibleCandidateCount`.
     //
     // The list is intentionally NOT cleared immediately when the user keeps
     // typing (unlike the old behavior, which hid the list until the next
@@ -89,6 +87,7 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // within the current page (-1 = none highlighted).
     int page = 0;
     int cursor = 0;
+    int displayedPageSize = kCandidateFetchBatchSize;
 
     // Monotonic counter bumped on every edit. An async Google response
     // carries the generation it was issued for; if it no longer matches the
@@ -114,10 +113,9 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // there are genuinely no more candidates to page into.
     int candidatesNum = 0;
 
-    // The page a currently in-flight "fetch more" request is meant to populate,
-    // or -1 when none is in flight. Prevents queuing redundant fetch-more
-    // requests while one is already pending for the same page.
-    int moreFetchPage = -1;
+    // Index of the first not-yet-fetched candidate for an in-flight
+    // fetch-more, or -1 if none. Prevents duplicate requests at the frontier.
+    int moreFetchStartIndex = -1;
 
     // Per-IC toggle state for paired (opening/closing) punctuation — the
     // standard CJK behavior where pressing a quote key alternates between the
@@ -254,7 +252,7 @@ public:
     void applyCandidates(fcitx::InputContext *ic,
                          std::vector<GoogleCandidate> candidates,
                          std::string probe, uint64_t gen,
-                         uint64_t serial, int num, int targetPage,
+                         uint64_t serial, int num, int targetIndex,
                          uint64_t configGen);
 
     // Select a candidate: commit its text, extend the committed context,
@@ -349,32 +347,23 @@ private:
     // thread, then post the result back to the main event loop via a
     // thread-safe async event.
     //
-    // `num` is how many candidates to ask Google for. For a normal keystroke
-    // lookup this is numForPage(0) (= kPageSize, the first page). For a "fetch
-    // more" triggered by paging past the available candidates it grows with the
-    // target page (numForPage(targetPage) = kPageSize * (targetPage + 1)),
-    // matching Google's own web client which re-requests the same text with a
-    // larger `num` when the user pages for more (observed in a HAR capture:
-    // num=13 then num=25 for the same query).
-    //
-    // `targetPage` is the candidate page the result should land on once it
-    // arrives: 0 for a normal keystroke lookup (the preedit changed, so we
-    // restart at the first page), or the page the user paged into for a "fetch
-    // more". applyCandidates clamps it to the last valid page if Google
-    // returned fewer candidates than requested.
+    // Requests grow in fixed kCandidateFetchBatchSize increments, independent
+    // of the number of rows shown per page. targetIndex is zero for a fresh
+    // lookup, or the current candidate count for a fetch-more; applyCandidates
+    // uses that frontier to continue the partially-filled visible page.
     void dispatchRequest(fcitx::InputContext *ic, GoogleIMEState *state,
-                         int num, int targetPage, bool isMore);
+                         int num, int targetIndex, bool isMore);
 
     // Convenience for the common "re-query the current preedit from scratch"
-    // case: a normal (non-paging) lookup, first page, num = kPageSize.
+    // case: a normal (non-paging) lookup, first fetch batch.
     void lookupNow(fcitx::InputContext *ic, GoogleIMEState *state) {
-        dispatchRequest(ic, state, numForPage(0), 0, false);
+        dispatchRequest(ic, state, kCandidateFetchBatchSize, 0, false);
     }
 
-    // Number of candidates to request from Google so that the given 0-based
-    // page is fully populated: kPageSize for page 0, 2*kPageSize for page 1,
-    // 3*kPageSize for page 2, ... (9, 18, 27, ...). This is the per-page growth
-    // the user pages through with Down/PageDown/PageUp.
+    int visibleCandidateCount() const {
+        return effectiveCandidateListSize(config_.candidateListSize.value());
+    }
+    void syncCandidatePageSize(GoogleIMEState *state) const;
 
     // Per-input-context state property factory. SimpleInputContextPropertyFactory
     // default-constructs (it does `new GoogleIMEState` per input context).
@@ -433,11 +422,6 @@ private:
 
     static constexpr char kInputCode[] = "yue-hant-t-i0-und";
 
-    // Candidates requested for a given 0-based page: 9 for page 0, 18 for
-    // page 1, 27 for page 2, ... See dispatchRequest.
-    static constexpr int numForPage(int page) {
-        return kPageSize * (page + 1);
-    }
 };
 
 class GoogleIMEFactory : public fcitx::AddonFactory {

@@ -5,7 +5,8 @@
 int main() {
     {
         GoogleIMEConfig config;
-        if (config.preeditResetBehavior.value() !=
+        if (config.candidateListSize.value() != 9 ||
+            config.preeditResetBehavior.value() !=
                 PreeditResetBehavior::CommitRaw ||
             PreeditResetBehaviorToString(PreeditResetBehavior::CommitRaw) !=
                 "Commit raw preedit" ||
@@ -55,5 +56,12 @@ int main() {
         effectivePreeditLimit(0) != 64 ||
         effectivePreeditLimit(-1) != 64) {
         return 4;
+    }
+    if (effectiveCandidateListSize(9) != 9 ||
+        effectiveCandidateListSize(1) != 1 ||
+        effectiveCandidateListSize(0) != 1 ||
+        effectiveCandidateListSize(-1) != 1 ||
+        effectiveCandidateListSize(10) != 9) {
+        return 6;
     }
 }

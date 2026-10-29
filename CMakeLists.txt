@@ -83,6 +83,14 @@ if(BUILD_TESTING)
     target_compile_options(daemon_client_test PRIVATE
         -Wall -Wextra -Wpedantic -Wconversion)
     add_test(NAME daemon_client COMMAND daemon_client_test)
+
+    add_executable(candidate_paging_test tests/candidate_paging_test.cc)
+    target_compile_features(candidate_paging_test PRIVATE cxx_std_17)
+    target_include_directories(candidate_paging_test PRIVATE src)
+    target_link_libraries(candidate_paging_test PRIVATE Fcitx5::Core Fcitx5::Utils)
+    target_compile_options(candidate_paging_test PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion)
+    add_test(NAME candidate_paging COMMAND candidate_paging_test)
 endif()
 
 # Generate addon/inputmethod metadata from .conf.in templates. configure_file
@@ -105,3 +113,5 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/data/addon/google-ime.conf
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/addon)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/data/inputmethod/google-ime.conf
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/inputmethod)
+install(FILES data/icons/google-ime.svg
+        DESTINATION ${FCITX_INSTALL_PKGDATADIR}/imicon)

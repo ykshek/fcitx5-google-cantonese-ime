@@ -8,6 +8,14 @@ This is a mostly vibe-coded project. Code quality is not guaranteed and has the 
 
 This IME thingamajig makes HTTPS requests to Google Input Tools to send your inputs through the Internet to Google, and will come with all the caveats of that (latency, privacy, and dependence on a third-party endpoint you don't control).
 
+## Google and icon disclaimer
+
+This project is independent and is not affiliated with, endorsed by, or sponsored
+by Google. Google owns its own names, logos, and Input Tools iconography; this
+project does not claim ownership of Google's icon supplied as a visual
+reference, and that icon is not included here. The add-on's included input icon
+is original artwork created for this project.
+
 ## fcitx5 Google Input Tools IME
 
 <img width="408" height="430" alt="20260828_094513" src="https://github.com/user-attachments/assets/94b6bf97-dcc7-40bf-b2af-6dee55f281e1" />
@@ -95,7 +103,8 @@ the Fcitx5 configuration tool.
 ## Usage
 
 - Type romanized input (latin letters). The preedit shows what you typed.
-- Candidates appear automatically after a short debounce; press `1`-`9` (and `0`) to select one, or `Space` for the highlighted candidate.
+- Candidates appear automatically after a short debounce; press `1`-`9` to select a visible candidate, or `Space` for the highlighted candidate.
+- The candidate panel shows up to the configured number of rows. Navigation advances through every candidate; Google results are fetched in batches of nine. Digits that do not label a visible candidate remain available as romanized/tone input.
 - `Up`/`Down` move the highlight through the candidate list, wrapping across pages at the boundaries. `PageUp`/`PageDown` switch candidate pages directly.
 - `Enter` commits the raw buffer (the typed latin letters) as an escape hatch.
 - `Backspace` deletes the last character of the query and re-queries Google.
@@ -127,6 +136,12 @@ the IME with Shift or Ctrl+Space. It defaults to **Commit raw preedit**; choose
 commit the first fresh candidate. If no fresh candidate is available, the raw
 preedit is committed instead; any romanization left over after a partial
 candidate is committed raw as well.
+
+**Candidates per page** controls how many rows the candidate panel displays
+(default 9, maximum 9). Smaller values shorten each visible page, while
+navigation still traverses the complete result list without skipping entries.
+Google lookups continue to request results in batches of nine. Number keys
+without a visible candidate label are treated as romanized/tone input.
 
 Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
