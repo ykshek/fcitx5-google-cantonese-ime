@@ -13,8 +13,9 @@ This IME thingamajig makes HTTPS requests to Google Input Tools to send your inp
 This project is independent and is not affiliated with, endorsed by, or sponsored
 by Google. Google owns its own names, logos, and Input Tools iconography; this
 project does not claim ownership of Google's icon supplied as a visual
-reference, and that icon is not included here. The add-on uses an icon from the
-system icon theme.
+reference, and that icon is not included here. The add-on uses the
+`fcitx-googlepinyin-panel` icon from the system icon theme (Papirus); no icon
+artwork is included in this repository.
 
 ## fcitx5 Google Input Tools IME
 
@@ -67,13 +68,21 @@ just install-flatpak
 ```
 
 This installs the Flatpak-packaged `org.flatpak.Builder` if it is not already
-installed, then builds and installs the add-on.
+installed, then builds and installs the add-on. It also links the Papirus tray
+icon as described in [Tray icon](#tray-icon).
 
 The add-on is installed under the Fcitx5 Flatpak's extension point; it does not
 install files into the host's `/usr`. The Fcitx5 Flatpak must be installed and
 running for the add-on to be loaded. The engine sends queries to Google Input
 Tools, so it requires the network permission already granted by the Fcitx5
 Flatpak.
+
+Restart Fcitx5 after installing or updating the add-on, otherwise the already
+running instance keeps using the previous extension:
+
+```bash
+flatpak kill org.fcitx.Fcitx5   # start it again the way you normally do
+```
 
 Tagged releases publish an installable Flatpak bundle and `SHA256SUMS` on the
 GitHub Releases page. Install a downloaded bundle with:
@@ -82,6 +91,55 @@ GitHub Releases page. Install a downloaded bundle with:
 flatpak install --user ./org.fcitx.Fcitx5.Addon.GoogleIME-VERSION-x86_64.flatpak
 ```
 
+Bundle installations do not run the repository's `just` recipes; run
+`just install-tray-icon` once from a clone to get the tray icon (see below).
+
+### Tray icon
+
+The input method declares the Papirus icon name in
+[`data/inputmethod/google-ime.conf.in`](data/inputmethod/google-ime.conf.in):
+
+```ini
+Icon=fcitx-googlepinyin-panel
+```
+
+That is enough for a native Fcitx5 install, because Papirus-Dark provides
+`fcitx-googlepinyin-panel` directly. Inside the Flatpak it is not enough:
+
+- fcitx5 rewrites every icon name that starts with `fcitx` to
+  `org.fcitx.Fcitx5.fcitx...` before it exports the
+  [StatusNotifierItem](https://www.freedesktop.org/wiki/Specifications/StatusNotifierItem/)
+  to the desktop (`IconTheme::iconName` in fcitx5). KDE Plasma or GNOME
+  therefore asks its icon theme for
+  `org.fcitx.Fcitx5.fcitx-googlepinyin-panel`, which Papirus does not ship.
+- The official Flatpak add-ons — Rime included — never hit this because the
+  Flatpak for the `org.fcitx.Fcitx5` app itself builds their icons. Its
+  `fcitx5-all-icons` module checks out every official add-on repository and
+  runs its `install_icons` script, which copies
+  `fcitx5*/{data,icons,icon}/{16x16,...,scalable}` into
+  `/app/share/icons/hicolor/...`. Rime's `data/` directory ships the icon twice,
+  once as `fcitx-rime.*` and once as `org.fcitx.Fcitx5.fcitx-rime.*`, and Flatpak
+  exports that directory to the host icon theme, so the prefixed name resolves.
+- A third-party add-on cannot add files to the main app, and icons installed
+  inside the add-on extension (`/app/addons/GoogleIME/share`) are only visible
+  *inside* the sandbox (the Flatpak's `fcitx5.sh` wrapper adds
+  `/app/addons/*/share` to `XDG_DATA_DIRS`). The host's tray is outside the
+  sandbox and never sees them.
+
+So `just install-flatpak` runs `just install-tray-icon` afterwards. That recipe
+links the system Papirus icon into the user's hicolor theme under the prefixed
+name the desktop asks for:
+
+```
+~/.local/share/icons/hicolor/scalable/apps/org.fcitx.Fcitx5.fcitx-googlepinyin-panel.svg
+    -> ~/.local/share/icons/Papirus-Dark/24x24/panel/fcitx-googlepinyin-panel.svg
+```
+
+It is only a symlink: no artwork is copied or vendored, and it follows the
+Papirus theme. If the icon still shows as a generic fallback after restarting
+Fcitx5, restart the desktop shell (on Plasma: log out and back in) so it drops
+any cached "missing icon" result.
+
 ## Building
 
 `just` scripts build and install the Fcitx5 Flatpak add-on using the
@@ -89,16 +147,17 @@ Flatpak-packaged builder:
 
 ```bash
 just build-flatpak     # build and verify the Fcitx5 Flatpak add-on
-just install-flatpak   # build and install the add-on for the current user
+just install-flatpak   # build, install, and link the tray icon
+just install-tray-icon # only (re)link the Papirus tray icon on the host
 ```
 
 The Flatpak build requires the Flathub remote and installs the
 `org.flatpak.Builder` Flatpak when needed. `just build-flatpak` builds and
 verifies the add-on without installing it; `just install-flatpak` builds and
-installs it for the current user.
+installs it for the current user and then links the tray icon.
 
-After installation, restart Fcitx5 and add the "Google IME" input method in
-the Fcitx5 configuration tool.
+After installation, restart Fcitx5 (see above) and add the "Google IME" input
+method in the Fcitx5 configuration tool.
 
 ## Usage
 
