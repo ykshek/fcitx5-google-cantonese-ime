@@ -1,4 +1,4 @@
-name: Build and Test
+name: Build Flatpak Add-on
 
 on:
   push:
@@ -6,88 +6,7 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-builder
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-
-    - name: Build development container
-      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-      with:
-        context: .
-        file: Containerfile
-        tags: localhost/fcitx5-google-cantonese-ime:dev
-        load: true
-        cache-from: type=gha,scope=fcitx5-devcontainer
-        cache-to: type=gha,mode=max,scope=fcitx5-devcontainer
-
-    - name: Build project
-      run: |
-        mkdir -p build
-        docker run --rm \
-          --volume "$(pwd):/workspace" \
-          --workdir /workspace \
-          localhost/fcitx5-google-cantonese-ime:dev \
-          bash -c '
-            set -euo pipefail
-            cd build
-            cmake .. \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=/usr
-            make -j$(nproc)
-            ctest --test-dir . --output-on-failure
-          '
-
-    - name: Test RPM build
-      run: |
-        # Create RPM build structure
-        mkdir -p rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
-
-        # Create source tarball with valid RPM version (no hyphens)
-        VERSION=$(grep '^Version:' fcitx5-google-cantonese-ime.spec | awk '{print $2}')
-        git archive --format=tar.gz --prefix=v${VERSION}/ HEAD > rpmbuild/SOURCES/v${VERSION}.tar.gz
-
-        # Copy spec file
-        cp fcitx5-google-cantonese-ime.spec rpmbuild/SPECS/
-
-        # Test RPM build
-        docker run --rm \
-          --volume "$(pwd):/workspace" \
-          --workdir /workspace \
-          localhost/fcitx5-google-cantonese-ime:dev \
-          bash -c "
-            set -euo pipefail
-            rpmbuild --define '_topdir /workspace/rpmbuild' \
-                     --define 'version ${VERSION}' \
-                     -ba rpmbuild/SPECS/fcitx5-google-cantonese-ime.spec
-          "
-
-        echo "RPM build test successful!"
-        find rpmbuild/RPMS -name "*.rpm" -type f
-        find rpmbuild/SRPMS -name "*.rpm" -type f
-
-    - name: Upload RPM build artifacts
-      if: always()
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-      with:
-        name: build-rpm-artifacts
-        path: |
-          rpmbuild/RPMS/
-          rpmbuild/SRPMS/
-        retention-days: 7
-
   build-flatpak:
     runs-on: ubuntu-latest
     permissions:

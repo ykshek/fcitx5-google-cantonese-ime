@@ -1,5 +1,4 @@
 build
 builddir
-rpmbuild
 flatpak/source.tar.gz
 .flatpak-builder
