@@ -13,8 +13,8 @@ This IME thingamajig makes HTTPS requests to Google Input Tools to send your inp
 This project is independent and is not affiliated with, endorsed by, or sponsored
 by Google. Google owns its own names, logos, and Input Tools iconography; this
 project does not claim ownership of Google's icon supplied as a visual
-reference, and that icon is not included here. The add-on's included input icon
-is original artwork created for this project.
+reference, and that icon is not included here. The add-on uses an icon from the
+system icon theme.
 
 ## fcitx5 Google Input Tools IME
 

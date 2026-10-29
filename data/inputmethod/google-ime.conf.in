@@ -1,6 +1,6 @@
 [InputMethod]
 Name=Google IME
-Icon=fcitx-google-ime
+Icon=fcitx-googlepinyin-panel
 Label=粵
 LangCode=zh
 Addon=google-ime

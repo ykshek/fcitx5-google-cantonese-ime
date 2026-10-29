@@ -113,11 +113,3 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/data/addon/google-ime.conf
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/addon)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/data/inputmethod/google-ime.conf
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/inputmethod)
-install(FILES data/icons/google-ime.svg
-        DESTINATION ${FCITX_INSTALL_PKGDATADIR}/imicon)
-install(FILES data/icons/google-ime.svg
-        DESTINATION ${FCITX_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-        RENAME fcitx-google-ime.svg)
-install(FILES data/icons/google-ime.svg
-        DESTINATION ${FCITX_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-        RENAME org.fcitx.Fcitx5.fcitx-google-ime.svg)

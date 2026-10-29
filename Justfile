@@ -33,10 +33,7 @@ build-flatpak: install-flatpak-builder
     test ! -e "$flatpak_files/lib64/fcitx5/libfcitx5-google-ime.so"
     test -f "$flatpak_files/share/fcitx5/addon/google-ime.conf"
     test -f "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
-    test -f "$flatpak_files/share/fcitx5/imicon/google-ime.svg"
-    test -f "$flatpak_files/share/icons/hicolor/scalable/apps/fcitx-google-ime.svg"
-    test -f "$flatpak_files/share/icons/hicolor/scalable/apps/org.fcitx.Fcitx5.fcitx-google-ime.svg"
-    grep -Fxq "Icon=fcitx-google-ime" \
+    grep -Fxq "Icon=fcitx-googlepinyin-panel" \
         "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
     test -f "$flatpak_files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml"
 
