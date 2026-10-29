@@ -34,8 +34,9 @@ build-flatpak: install-flatpak-builder
     test -f "$flatpak_files/share/fcitx5/addon/google-ime.conf"
     test -f "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
     test -f "$flatpak_files/share/fcitx5/imicon/google-ime.svg"
-    test -f "$flatpak_files/share/icons/hicolor/scalable/apps/ykshekGoogleIME.svg"
-    grep -Fxq "Icon=ykshekGoogleIME" \
+    test -f "$flatpak_files/share/icons/hicolor/scalable/apps/fcitx-google-ime.svg"
+    test -f "$flatpak_files/share/icons/hicolor/scalable/apps/org.fcitx.Fcitx5.fcitx-google-ime.svg"
+    grep -Fxq "Icon=fcitx-google-ime" \
         "$flatpak_files/share/fcitx5/inputmethod/google-ime.conf"
     test -f "$flatpak_files/share/metainfo/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml"
 
@@ -56,10 +57,6 @@ install-flatpak: install-flatpak-builder
         --install-deps-from=flathub \
         --repo=build/flatpak-repo \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
-    # The SNI tray icon is resolved by the host desktop, outside the Flatpak
-    # extension. Install the named icon into the host user's icon theme too.
-    icon_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
-    install -Dm644 data/icons/google-ime.svg "$icon_dir/ykshekGoogleIME.svg"
 
 bump-version version:
     #!/usr/bin/env bash

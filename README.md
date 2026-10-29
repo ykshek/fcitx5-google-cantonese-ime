@@ -95,9 +95,7 @@ just install-flatpak   # build and install the add-on for the current user
 The Flatpak build requires the Flathub remote and installs the
 `org.flatpak.Builder` Flatpak when needed. `just build-flatpak` builds and
 verifies the add-on without installing it; `just install-flatpak` builds and
-installs it for the current user. The install recipe also places the tray icon
-in the host user's icon theme because the desktop shell resolves Fcitx's
-StatusNotifier icon outside the Flatpak sandbox.
+installs it for the current user.
 
 After installation, restart Fcitx5 and add the "Google IME" input method in
 the Fcitx5 configuration tool.

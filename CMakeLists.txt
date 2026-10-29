@@ -117,4 +117,7 @@ install(FILES data/icons/google-ime.svg
         DESTINATION ${FCITX_INSTALL_PKGDATADIR}/imicon)
 install(FILES data/icons/google-ime.svg
         DESTINATION ${FCITX_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-        RENAME ykshekGoogleIME.svg)
+        RENAME fcitx-google-ime.svg)
+install(FILES data/icons/google-ime.svg
+        DESTINATION ${FCITX_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME org.fcitx.Fcitx5.fcitx-google-ime.svg)
