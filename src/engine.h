@@ -94,7 +94,7 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // current generation when it arrives, it is discarded. This is what makes
     // fast typing safe: stale in-flight responses can never overwrite newer
     // candidate lists.
-    std::atomic<uint64_t> generation{0};
+    uint64_t generation = 0;
 
     // Monotonic per-request serial, bumped on EVERY dispatchRequest() (not just
     // on edits). This is stricter than `generation`: two requests can share the
@@ -102,7 +102,7 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // lookup racing a num=18 "fetch more" triggered by paging down, both for the
     // unchanged preedit). The serial guarantees the LATER of two such requests
     // wins — an older num=9 response can never overwrite a newer num=18 list.
-    std::atomic<uint64_t> requestSerial{0};
+    uint64_t requestSerial = 0;
 
     // The `num` that was requested for the currently-stored candidate list
     // (i.e. what Google was asked to return). Google returns exactly `num`
@@ -128,12 +128,6 @@ struct GoogleIMEState : public fcitx::InputContextProperty {
     // as a member so each new keystroke can cancel (replace) the previous
     // timer — this is the rate-limiting / debounce mechanism.
     std::unique_ptr<fcitx::EventSourceTime> debounceTimer;
-
-    // In-flight CURL handle for cancellation. When a new request is scheduled,
-    // any pending handle is aborted (curl_easy_abort) and released back to the
-    // pool before the new request starts. This avoids wasting bandwidth/CPU on
-    // stale in-flight requests.
-    CURL* pendingCurlHandle = nullptr;
 
     // Set when the user types punctuation while a lookup is still in flight
     // (no candidates yet to resolve against). We defer emitting the

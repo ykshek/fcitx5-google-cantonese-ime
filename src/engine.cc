@@ -660,21 +660,13 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
         }
     }
 
-    // Abort any in-flight curl request before starting a new one.
-    if (state->pendingCurlHandle) {
-        curl_easy_abort(state->pendingCurlHandle);
-        // Release the aborted handle back to the pool.
-        handlePool().release(state->pendingCurlHandle);
-        state->pendingCurlHandle = nullptr;
-    }
-
     // The HTTP GET blocks for ~100ms; do it on a worker thread so the main
     // event loop (and all of fcitx5's input handling) is never blocked.
     auto done = std::make_shared<std::atomic_bool>(false);
-    std::thread worker([engine, result, raw, num, done, sendMutex, state]() {
+    std::thread worker([engine, result, raw, num, done, sendMutex]() {
         try {
             result->candidates =
-                get_candidates(result->probe, result->inputCode, num, state);
+                get_candidates(result->probe, result->inputCode, num);
         } catch (const std::exception &e) {
             FCITX_WARN() << "GoogleIMEEngine(worker): get_candidates: "
                          << e.what();
