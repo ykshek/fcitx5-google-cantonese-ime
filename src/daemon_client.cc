@@ -310,7 +310,8 @@ parse_candidates_response(const std::string& response, const std::string& itc) {
 }
 
 std::vector<GoogleCandidate> get_candidates(const std::string& text,
-                                            const std::string& itc, int num) {
+                                            const std::string& itc, int num,
+                                            GoogleIMEState* state) {
     std::vector<GoogleCandidate> out;
     if (text.empty()) return out;
 
@@ -322,6 +323,10 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
         FCITX_WARN() << "get_candidates: request concurrency limit reached or CURL initialization failed";
         return out;
     }
+
+    // Store the curl handle in state so it can be aborted by the main thread
+    // when a new request is scheduled.
+    state->pendingCurlHandle = curl;
 
     auto url = build_url(curl, text, itc, num);
     if (!url) {
@@ -354,5 +359,8 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
     }
 
 
+    // Clear the pending handle - the PooledHandle destructor will release
+    // the CURL handle back to the pool.
+    state->pendingCurlHandle = nullptr;
     return parse_candidates_response(response, itc);
 }

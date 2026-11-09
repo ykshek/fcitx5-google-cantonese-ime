@@ -38,8 +38,12 @@ struct GoogleCandidate {
 //      or "zh-t-i0-pinyin" (Mandarin pinyin)
 // num: number of candidates requested
 std::vector<GoogleCandidate> get_candidates(const std::string& text,
-                                            const std::string& itc = "yue-hant-t-i0-und",
-                                            int num = 13);
+                                            const std::string& itc,
+                                            int num,
+                                            GoogleIMEState* state);
+
+// Accessor for the CURL handle pool (used by engine.cc to abort pending requests).
+CurlHandlePool& handlePool();
 
 std::vector<GoogleCandidate>
 parse_candidates_response(const std::string& response,
