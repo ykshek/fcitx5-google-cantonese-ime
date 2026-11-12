@@ -115,13 +115,11 @@ void CandidateCache::put(std::string text, std::string itc, int num,
     if (capacity_ == 0) return;
 
     insertLocked(std::move(key), std::move(candidates));
-    if (persistent_) saveLocked();
 }
 
 void CandidateCache::configure(std::size_t capacity, std::chrono::seconds ttl,
                                bool persistent) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool capacityChanged = capacity != capacity_;
     const bool enablingPersistence = !persistent_ && persistent;
     capacity_ = capacity;
     ttl_ = ttl;
@@ -139,7 +137,6 @@ void CandidateCache::configure(std::size_t capacity, std::chrono::seconds ttl,
         return;
     }
     trimLocked();
-    if (persistent_ && capacityChanged) saveLocked();
 }
 
 std::size_t CandidateCache::size() const {

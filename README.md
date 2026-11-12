@@ -207,10 +207,13 @@ lookups (default 64; set to 0 to disable and clear the cache). **Candidate cache
 lifetime** sets the in-memory TTL in minutes (default 5, maximum 1440).
 **Persist candidate cache across restarts** opts in to storing entries under
 `$XDG_CACHE_HOME/fcitx5-google-cantonese-ime/` (or `~/.cache/` when unset).
-Persistent mode ignores the TTL; disabling it removes the disk cache. Entries
-are keyed by the complete query, input layout, and requested candidate count,
-and have an estimated 8 MiB footprint limit. Persistent files are private to
-the current user; without the opt-in, no input text is written to disk.
+Persistent mode ignores the TTL and writes the in-memory cache on normal
+shutdown, not on each lookup; changes since the previous shutdown can be lost
+if Fcitx5 crashes or is forcibly terminated. Disabling persistence removes the
+disk cache. Entries are keyed by the complete query, input layout, and requested
+candidate count, and have an estimated 8 MiB footprint limit. Persistent files
+are private to the current user; without the opt-in, no input text is written
+to disk.
 
 Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
@@ -227,7 +230,7 @@ Built-in layouts and their `itc` codes (verified live against `https://inputtool
 ## Behavior notes
 
 - **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). A `kDebounceMs` (15 ms) debounce timer is reset on every keystroke; that is short enough to coalesce only genuinely-simultaneous events (e.g. IME engines that synthesize multiple key events per physical keystroke) while still firing effectively one request per real keystroke (matching observed Google behavior, where successive requests are ~50-120 ms apart). Stale in-flight responses are discarded via a per-input-context generation counter.
-- **Candidate cache.** Exact successful lookups are reused from a thread-safe LRU. Failed and empty results are not cached. The configured entry limit is additionally bounded by an estimated 8 MiB footprint. The cache is memory-only by default; optional disk persistence ignores TTL expiry and survives restarts.
+- **Candidate cache.** Exact successful lookups are reused from a thread-safe LRU. Failed and empty results are not cached. The configured entry limit is additionally bounded by an estimated 8 MiB footprint. The cache is memory-only by default; optional disk persistence ignores TTL expiry and saves a snapshot on normal shutdown.
 - **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields does not corrupt the composition.
 - **Prediction context.** Comma-like punctuation (including `，` and `、`) remains in the context sent to Google; sentence-ending punctuation clears it.
 

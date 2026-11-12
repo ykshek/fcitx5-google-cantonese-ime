@@ -65,16 +65,19 @@ int main() {
     {
         CandidateCache persistent(2, std::chrono::seconds(0), true, cacheFile);
         persistent.put("nei", "yue", 9, candidates("你"));
-        if (!std::filesystem::exists(cacheFile)) return 9;
+        if (std::filesystem::exists(cacheFile)) return 9;
+        persistent.configure(1, std::chrono::seconds(0), true);
+        if (std::filesystem::exists(cacheFile)) return 10;
     }
+    if (!std::filesystem::exists(cacheFile)) return 11;
     {
         CandidateCache restored(2, std::chrono::seconds(0), true, cacheFile);
         const auto persisted = restored.get("nei", "yue", 9);
-        if (!persisted || persisted->front().text != "你") return 10;
+        if (!persisted || persisted->front().text != "你") return 12;
         restored.configure(2, std::chrono::minutes(5), false);
         if (std::filesystem::exists(cacheFile) ||
             !restored.get("nei", "yue", 9)) {
-            return 11;
+            return 13;
         }
     }
 }
