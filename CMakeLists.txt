@@ -34,6 +34,7 @@ endif()
 
 add_library(fcitx5-google-ime MODULE
     src/engine.cc
+    src/candidate_cache.cc
     src/daemon_client.cc)
 
 target_compile_features(fcitx5-google-ime PRIVATE cxx_std_17)
@@ -69,10 +70,12 @@ if(BUILD_TESTING)
 
     add_executable(daemon_client_test
         tests/daemon_client_test.cc
+        src/candidate_cache.cc
         src/daemon_client.cc)
     target_compile_features(daemon_client_test PRIVATE cxx_std_17)
     target_include_directories(daemon_client_test PRIVATE src)
-    target_link_libraries(daemon_client_test PRIVATE Fcitx5::Utils)
+    target_link_libraries(daemon_client_test PRIVATE
+        Fcitx5::Utils Threads::Threads)
     if(TARGET CURL::libcurl)
         target_link_libraries(daemon_client_test PRIVATE CURL::libcurl)
     else()
@@ -94,10 +97,16 @@ if(BUILD_TESTING)
         -Wall -Wextra -Wpedantic -Wconversion)
     add_test(NAME candidate_paging COMMAND candidate_paging_test)
 
-    add_executable(candidate_cache_test tests/candidate_cache_test.cc)
+    add_executable(candidate_cache_test
+        tests/candidate_cache_test.cc
+        src/candidate_cache.cc)
     target_compile_features(candidate_cache_test PRIVATE cxx_std_17)
     target_include_directories(candidate_cache_test PRIVATE src)
-    target_link_libraries(candidate_cache_test PRIVATE Threads::Threads)
+    target_link_libraries(candidate_cache_test PRIVATE
+        Fcitx5::Utils Threads::Threads)
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(candidate_cache_test PRIVATE nlohmann_json::nlohmann_json)
+    endif()
     target_compile_options(candidate_cache_test PRIVATE
         -Wall -Wextra -Wpedantic -Wconversion)
     add_test(NAME candidate_cache COMMAND candidate_cache_test)

@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "candidate_cache.h"
 #include "config.h"       // GoogleIMEConfig (user-configurable itc layout)
 #include "daemon_client.h"  // get_candidates() queries Google Input Tools directly
 
@@ -1237,8 +1238,12 @@ void GoogleIMEEngine::reloadConfig() {
         safeSaveAsIni(raw, configFile);
     }
     config_.load(raw, false);
-    set_candidate_cache_capacity(static_cast<std::size_t>(
-        effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())));
+    configure_candidate_cache(
+        static_cast<std::size_t>(
+            effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())),
+        effectiveCandidateCacheTtlMinutes(
+            config_.candidateCacheTtlMinutes.value()),
+        config_.persistentCandidateCache.value());
     if (previousInputCode != effectiveInputCode()) {
         // Only query-layout changes invalidate a request. Presentation-only
         // settings such as the visible candidate count do not change its data.
@@ -1253,8 +1258,12 @@ void GoogleIMEEngine::setConfig(const fcitx::RawConfig &config) {
     const std::string previousInputCode = effectiveInputCode();
     config_.load(config, true);
     safeSaveAsIni(config_, configFile);
-    set_candidate_cache_capacity(static_cast<std::size_t>(
-        effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())));
+    configure_candidate_cache(
+        static_cast<std::size_t>(
+            effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())),
+        effectiveCandidateCacheTtlMinutes(
+            config_.candidateCacheTtlMinutes.value()),
+        config_.persistentCandidateCache.value());
     if (previousInputCode != effectiveInputCode()) {
         ++configGeneration_;
     }

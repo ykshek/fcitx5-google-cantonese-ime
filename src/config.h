@@ -108,6 +108,15 @@ FCITX_CONFIGURATION(
         this, "CandidateCacheEntries", _("Candidate cache entries (0-256)"),
         64, fcitx::IntConstrain(0, 256)};
 
+    fcitx::Option<int, fcitx::IntConstrain> candidateCacheTtlMinutes{
+        this, "CandidateCacheTtlMinutes",
+        _("Candidate cache lifetime in minutes (1-1440)"), 5,
+        fcitx::IntConstrain(1, 1440)};
+
+    fcitx::Option<bool> persistentCandidateCache{
+        this, "PersistentCandidateCache",
+        _("Persist candidate cache across restarts"), false};
+
     fcitx::Option<int> preeditLimit{
         this, "PreeditLimit", _("Preedit length limit (characters)"), 64};
 
@@ -180,4 +189,8 @@ inline int effectiveCandidateListSize(int configuredSize) {
 
 inline int effectiveCandidateCacheEntries(int configuredSize) {
     return std::clamp(configuredSize, 0, 256);
+}
+
+inline int effectiveCandidateCacheTtlMinutes(int configuredMinutes) {
+    return std::clamp(configuredMinutes, 1, 1440);
 }

@@ -31,10 +31,6 @@ struct GoogleCandidate {
     std::string annotation;
 };
 
-// Set the process-wide in-memory candidate cache capacity. A capacity of zero
-// disables and clears the cache.
-void set_candidate_cache_capacity(std::size_t capacity);
-
 // text: raw romanized input typed by the user (e.g. latin letters / jyutping)
 //       optionally prefixed with committed Chinese context in the format
 //       Google's own web client uses: "|<committed context>,<preedit>".

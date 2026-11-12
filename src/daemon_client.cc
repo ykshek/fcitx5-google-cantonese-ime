@@ -29,11 +29,6 @@ constexpr size_t kMaxResponseBytes = 1U << 20;
 // once even under concurrent keystrokes.
 std::once_flag g_curl_once;
 
-CandidateCache& candidateCache() {
-    static CandidateCache cache;
-    return cache;
-}
-
 void ensure_curl_global_init() {
     std::call_once(g_curl_once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
@@ -233,10 +228,6 @@ std::optional<std::string> build_url(CURL* curl, const std::string& text,
 }
 }  // namespace
 
-void set_candidate_cache_capacity(std::size_t capacity) {
-    candidateCache().setCapacity(capacity);
-}
-
 std::vector<GoogleCandidate>
 parse_candidates_response(const std::string& response, const std::string& itc) {
     std::vector<GoogleCandidate> out;
@@ -324,7 +315,7 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
     std::vector<GoogleCandidate> out;
     if (text.empty()) return out;
 
-    if (auto cached = candidateCache().get(text, itc, num)) {
+    if (auto cached = candidate_cache().get(text, itc, num)) {
         return std::move(*cached);
     }
 
@@ -369,6 +360,6 @@ std::vector<GoogleCandidate> get_candidates(const std::string& text,
 
 
     out = parse_candidates_response(response, itc);
-    candidateCache().put(text, itc, num, out);
+    candidate_cache().put(text, itc, num, out);
     return out;
 }
