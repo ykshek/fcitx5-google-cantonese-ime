@@ -47,7 +47,7 @@ select candidate -> commitString
 
 Key points:
 
-- `src/daemon_client.{h,cc}` — `get_candidates(text, itc, num)` performs the HTTPS request with libcurl and parses the response with nlohmann/json. `curl_global_init` is run exactly once via `std::call_once` (the function is called from detached worker threads inside fcitx5).
+- `src/daemon_client.{h,cc}` — `get_candidates(text, itc, num)` performs the HTTPS request with libcurl and parses the response with nlohmann/json. A bounded, process-local LRU reuses recent successful results; `curl_global_init` is run exactly once via `std::call_once` (the function is called from detached worker threads inside fcitx5).
 - `src/engine.{h,cc}` — the fcitx5 `InputMethodEngine`. It maintains a composition buffer, runs `get_candidates()` asynchronously, posts the result back to the main event loop via `addDeferEvent`, and renders candidates through the `CandidateList`. A sequence counter drops stale results when the user keeps typing.
 - nlohmann/json decodes `\uXXXX` escapes (and UTF-16 surrogate pairs) into real UTF-8.
 - Google's endpoint expects `text=` separated by `|` and `,` to check both preedit and the context of previous words to give a better prediction.
@@ -202,6 +202,12 @@ navigation still traverses the complete result list without skipping entries.
 Google lookups continue to request results in batches of nine. Number keys
 without a visible candidate label are treated as romanized/tone input.
 
+**Candidate cache entries** controls the maximum number of recent successful
+lookups kept in memory (default 64; set to 0 to disable and clear the cache).
+Entries are keyed by the complete query, input layout, and requested candidate
+count, expire after five minutes, and have an estimated 8 MiB footprint limit.
+No input text is written to disk.
+
 Built-in layouts and their `itc` codes (verified live against `https://inputtools.google.com/request`):
 
 | Layout | `itc` code |
@@ -217,6 +223,7 @@ Built-in layouts and their `itc` codes (verified live against `https://inputtool
 ## Behavior notes
 
 - **Debounce / rate limiting.** Google Input Tools' public endpoint returns no rate-limit headers and does not send `429` for normal use (each request is ~100 ms). A `kDebounceMs` (15 ms) debounce timer is reset on every keystroke; that is short enough to coalesce only genuinely-simultaneous events (e.g. IME engines that synthesize multiple key events per physical keystroke) while still firing effectively one request per real keystroke (matching observed Google behavior, where successive requests are ~50-120 ms apart). Stale in-flight responses are discarded via a per-input-context generation counter.
+- **Candidate cache.** Exact successful lookups are reused from a thread-safe in-memory LRU. Failed and empty results are not cached; the configured entry limit is additionally bounded by an estimated 8 MiB footprint and a five-minute lifetime.
 - **Per-input-context state.** Composition state (buffer, candidates, page, cursor) is stored per input context via fcitx5's `InputContextProperty`, so switching focus between text fields does not corrupt the composition.
 - **Prediction context.** Comma-like punctuation (including `，` and `、`) remains in the context sent to Google; sentence-ending punctuation clears it.
 

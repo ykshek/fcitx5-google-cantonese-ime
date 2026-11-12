@@ -1237,6 +1237,8 @@ void GoogleIMEEngine::reloadConfig() {
         safeSaveAsIni(raw, configFile);
     }
     config_.load(raw, false);
+    set_candidate_cache_capacity(static_cast<std::size_t>(
+        effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())));
     if (previousInputCode != effectiveInputCode()) {
         // Only query-layout changes invalidate a request. Presentation-only
         // settings such as the visible candidate count do not change its data.
@@ -1251,6 +1253,8 @@ void GoogleIMEEngine::setConfig(const fcitx::RawConfig &config) {
     const std::string previousInputCode = effectiveInputCode();
     config_.load(config, true);
     safeSaveAsIni(config_, configFile);
+    set_candidate_cache_capacity(static_cast<std::size_t>(
+        effectiveCandidateCacheEntries(config_.candidateCacheEntries.value())));
     if (previousInputCode != effectiveInputCode()) {
         ++configGeneration_;
     }

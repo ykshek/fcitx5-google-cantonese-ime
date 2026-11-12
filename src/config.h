@@ -104,6 +104,10 @@ FCITX_CONFIGURATION(
         this, "CandidateListSize", _("Candidates per page (1-9)"), 9,
         fcitx::IntConstrain(1, 9)};
 
+    fcitx::Option<int, fcitx::IntConstrain> candidateCacheEntries{
+        this, "CandidateCacheEntries", _("Candidate cache entries (0-256)"),
+        64, fcitx::IntConstrain(0, 256)};
+
     fcitx::Option<int> preeditLimit{
         this, "PreeditLimit", _("Preedit length limit (characters)"), 64};
 
@@ -172,4 +176,8 @@ inline int effectivePreeditLimit(int configuredLimit) {
 
 inline int effectiveCandidateListSize(int configuredSize) {
     return std::clamp(configuredSize, 1, 9);
+}
+
+inline int effectiveCandidateCacheEntries(int configuredSize) {
+    return std::clamp(configuredSize, 0, 256);
 }

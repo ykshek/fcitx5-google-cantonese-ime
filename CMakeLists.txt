@@ -16,6 +16,7 @@ endif()
 find_package(Fcitx5Core REQUIRED)
 include("${FCITX_INSTALL_CMAKECONFIG_DIR}/Fcitx5Utils/Fcitx5CompilerSettings.cmake")
 find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
 
 # nlohmann/json for parsing Google Input Tools responses. Prefer a system package
 # when available; otherwise fetch the release from GitHub at configure time.
@@ -40,7 +41,8 @@ target_include_directories(fcitx5-google-ime PRIVATE src)
 target_compile_options(fcitx5-google-ime PRIVATE
     -Wall -Wextra -Wpedantic -Wconversion)
 
-target_link_libraries(fcitx5-google-ime PRIVATE Fcitx5::Core Fcitx5::Utils)
+target_link_libraries(fcitx5-google-ime PRIVATE
+    Fcitx5::Core Fcitx5::Utils Threads::Threads)
 if(TARGET CURL::libcurl)
     target_link_libraries(fcitx5-google-ime PRIVATE CURL::libcurl)
 else()
@@ -91,6 +93,14 @@ if(BUILD_TESTING)
     target_compile_options(candidate_paging_test PRIVATE
         -Wall -Wextra -Wpedantic -Wconversion)
     add_test(NAME candidate_paging COMMAND candidate_paging_test)
+
+    add_executable(candidate_cache_test tests/candidate_cache_test.cc)
+    target_compile_features(candidate_cache_test PRIVATE cxx_std_17)
+    target_include_directories(candidate_cache_test PRIVATE src)
+    target_link_libraries(candidate_cache_test PRIVATE Threads::Threads)
+    target_compile_options(candidate_cache_test PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion)
+    add_test(NAME candidate_cache COMMAND candidate_cache_test)
 endif()
 
 # Generate addon/inputmethod metadata from .conf.in templates. configure_file
