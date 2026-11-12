@@ -6,6 +6,7 @@ int main() {
     {
         GoogleIMEConfig config;
         if (config.candidateListSize.value() != 9 ||
+            config.candidateCacheEntries.value() != 64 ||
             config.preeditResetBehavior.value() !=
                 PreeditResetBehavior::CommitRaw ||
             PreeditResetBehaviorToString(PreeditResetBehavior::CommitRaw) !=
@@ -63,5 +64,11 @@ int main() {
         effectiveCandidateListSize(-1) != 1 ||
         effectiveCandidateListSize(10) != 9) {
         return 6;
+    }
+    if (effectiveCandidateCacheEntries(64) != 64 ||
+        effectiveCandidateCacheEntries(0) != 0 ||
+        effectiveCandidateCacheEntries(-1) != 0 ||
+        effectiveCandidateCacheEntries(300) != 256) {
+        return 7;
     }
 }
