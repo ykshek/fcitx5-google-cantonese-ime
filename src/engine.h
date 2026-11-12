@@ -252,7 +252,8 @@ public:
     void applyCandidates(fcitx::InputContext *ic,
                          std::vector<GoogleCandidate> candidates,
                          std::string probe, uint64_t gen,
-                         uint64_t serial, int num, int targetIndex,
+                         uint64_t serial, int num, int fetchFrontier,
+                         int displayIndex,
                          uint64_t configGen);
 
     // Select a candidate: commit its text, extend the committed context,
@@ -348,16 +349,17 @@ private:
     // thread-safe async event.
     //
     // Requests grow in fixed kCandidateFetchBatchSize increments, independent
-    // of the number of rows shown per page. targetIndex is zero for a fresh
-    // lookup, or the current candidate count for a fetch-more; applyCandidates
-    // uses that frontier to continue the partially-filled visible page.
+    // of the number of rows shown per page. fetchFrontier is zero for a fresh
+    // lookup or the current candidate count for a fetch-more; displayIndex
+    // keeps the highlight anchored while a partial page is being filled.
     void dispatchRequest(fcitx::InputContext *ic, GoogleIMEState *state,
-                         int num, int targetIndex, bool isMore);
+                         int num, int fetchFrontier, int displayIndex,
+                         bool isMore);
 
     // Convenience for the common "re-query the current preedit from scratch"
     // case: a normal (non-paging) lookup, first fetch batch.
     void lookupNow(fcitx::InputContext *ic, GoogleIMEState *state) {
-        dispatchRequest(ic, state, kCandidateFetchBatchSize, 0, false);
+        dispatchRequest(ic, state, kCandidateFetchBatchSize, 0, 0, false);
     }
 
     int visibleCandidateCount() const {

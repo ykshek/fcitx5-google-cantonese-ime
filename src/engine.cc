@@ -391,7 +391,8 @@ void GoogleIMEEngine::renderPanel(fcitx::InputContext *ic) {
 void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
                                       std::vector<GoogleCandidate> candidates,
                                       std::string probe, uint64_t gen,
-                                      uint64_t serial, int num, int targetIndex,
+                                      uint64_t serial, int num, int fetchFrontier,
+                                      int displayIndex,
                                       uint64_t configGen) {
     if (!ic) return;
     auto *state = ic->propertyFor(&stateFactory_);
@@ -411,12 +412,12 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
         return;
     }
 
-    if (targetIndex > 0 &&
-        static_cast<int>(candidates.size()) <= targetIndex) {
+    if (fetchFrontier > 0 &&
+        static_cast<int>(candidates.size()) <= fetchFrontier) {
         // Keep usable candidates if a fetch-more fails. A response with the
         // same count confirms there are no additional results; an empty
         // response may be a request failure and remains retryable.
-        if (static_cast<int>(candidates.size()) == targetIndex) {
+        if (static_cast<int>(candidates.size()) == fetchFrontier) {
             state->candidatesNum = num;
         }
         state->moreFetchStartIndex = -1;
@@ -429,13 +430,12 @@ void GoogleIMEEngine::applyCandidates(fcitx::InputContext *ic,
     state->candidatesConfigGeneration = configGen;
     state->candidatesNum = num;
     state->moreFetchStartIndex = -1;
-    // A normal lookup uses index 0; fetch-more uses the first index that was
-    // missing when it was dispatched. Clamp if the response ends before that
-    // target (for example, because Google has fewer candidates).
+    // Keep the page/cursor where fetch-more was initiated, even when it was
+    // dispatched early to fill a short page. Clamp if fewer candidates return.
     const int total = static_cast<int>(state->candidates.size());
     const int perPage = visibleCandidateCount();
     const auto [targetPage, targetCursor] =
-        candidatePageAndCursor(targetIndex, perPage);
+        candidatePageAndCursor(displayIndex, perPage);
     const int maxPage = std::max(0, candidatePageCount(total, perPage) - 1);
     state->page = std::min(targetPage, maxPage);
     const int pageStart = state->page * perPage;
@@ -552,7 +552,8 @@ void GoogleIMEEngine::scheduleRequest(fcitx::InputContext *ic,
 
 void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
                                      GoogleIMEState *state,
-                                     int num, int targetIndex, bool isMore) {
+                                     int num, int fetchFrontier, int displayIndex,
+                                     bool isMore) {
     if (!instance_) return;
 
     // Bump the per-request serial on every dispatch. This is stricter than the
@@ -563,7 +564,7 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     ++state->requestSerial;
     // Record the fetched-vector frontier for an in-flight fetch-more. A
     // normal lookup clears this marker.
-    state->moreFetchStartIndex = isMore ? targetIndex : -1;
+    state->moreFetchStartIndex = isMore ? fetchFrontier : -1;
 
     // Shared, heap-allocated result struct. The worker thread writes the
     // Google response into it, then calls send() on the async source (which
@@ -575,7 +576,8 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
         uint64_t gen = 0;
         uint64_t serial = 0;
         int num = 0;
-        int targetIndex = 0;
+        int fetchFrontier = 0;
+        int displayIndex = 0;
         // Google Input Tools `itc` code snapshotted on the main thread at
         // dispatch time (effectiveInputCode()). The worker thread reads only
         // this copy, never the live Configuration object, so no mutex is needed
@@ -596,7 +598,8 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
     result->gen = state->generation;
     result->serial = state->requestSerial;
     result->num = num;
-    result->targetIndex = targetIndex;
+    result->fetchFrontier = fetchFrontier;
+    result->displayIndex = displayIndex;
     // Snapshot the configured layout NOW, on the main thread: the worker must
     // not touch config_ (not mutex-guarded) and must use a single consistent
     // itc for its request even if the user changes the layout mid-flight.
@@ -622,7 +625,8 @@ void GoogleIMEEngine::dispatchRequest(fcitx::InputContext *ic,
                     engine->applyCandidates(ic, result->candidates,
                                            result->probe, result->gen,
                                            result->serial, result->num,
-                                           result->targetIndex,
+                                           result->fetchFrontier,
+                                           result->displayIndex,
                                            result->configGen);
                 } catch (const std::exception &e) {
                     FCITX_WARN() << "GoogleIMEEngine(applyCandidates): "
@@ -753,6 +757,29 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         const int perPage = visibleCandidateCount();
         const int totalPages = candidatePageCount(
             static_cast<int>(state->candidates.size()), perPage);
+        const auto requestMore = [&](int displayIndex) {
+            const int fetchFrontier =
+                static_cast<int>(state->candidates.size());
+            if (!candidatesFresh(state) ||
+                state->moreFetchStartIndex >= 0 ||
+                fetchFrontier != state->candidatesNum) {
+                return false;
+            }
+            dispatchRequest(ic, state,
+                            nextCandidateFetchLimit(state->candidatesNum),
+                            fetchFrontier, displayIndex, true);
+            return true;
+        };
+        const auto fillPartialPage = [&] {
+            const int candidateCount =
+                static_cast<int>(state->candidates.size());
+            if (!shouldFetchMoreToFillPage(
+                    candidateCount, state->candidatesNum, state->page, perPage,
+                    state->moreFetchStartIndex >= 0, candidatesFresh(state))) {
+                return false;
+            }
+            return requestMore(state->page * perPage + state->cursor);
+        };
 
         switch (sym) {
             case FcitxKey_Up: {
@@ -774,28 +801,30 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                     std::min(pageStart + perPage,
                              static_cast<int>(state->candidates.size()));
                 const int pageLen = pageEnd - pageStart;
+                bool advancedPage = false;
                 if (state->cursor < pageLen - 1) {
                     state->cursor++;
                 } else if (state->page < totalPages - 1) {
                     state->page++;
                     state->cursor = 0;
-                } else if (candidatesFresh(state) &&
-                           state->moreFetchStartIndex < 0 &&
-                           static_cast<int>(state->candidates.size()) ==
-                               state->candidatesNum) {
-                    // At the bottom of the last page, and the last fetch
-                    // returned a full set (Google might have more): re-request
-                    // the same preedit with a larger `num` so the next page is
-                    // populated. This mirrors Google's own web client, which
-                    // re-requests the same text with a larger `num` when the
-                    // user pages for more candidates. The result resumes at
-                    // the old end of the fetched vector.
-                    const int targetIndex =
-                        static_cast<int>(state->candidates.size());
-                    dispatchRequest(
-                        ic, state,
-                        nextCandidateFetchLimit(state->candidatesNum),
-                        targetIndex, true);
+                    advancedPage = true;
+                }
+                if (!fillPartialPage()) {
+                    const int currentPageStart = state->page * perPage;
+                    const int currentPageEnd = std::min(
+                        currentPageStart + perPage,
+                        static_cast<int>(state->candidates.size()));
+                    const int currentPageLength =
+                        currentPageEnd - currentPageStart;
+                    if (!advancedPage && state->page == totalPages - 1 &&
+                        state->cursor >= currentPageLength - 1) {
+                        // At the bottom of the last page, and the last fetch
+                        // returned a full set (Google might have more):
+                        // re-request with a larger `num`. Keep the current
+                        // position while it loads.
+                        requestMore(
+                            static_cast<int>(state->candidates.size()));
+                    }
                 }
                 renderPanel(ic);
                 keyEvent.filterAndAccept();
@@ -803,23 +832,13 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
             }
             case FcitxKey_Page_Up:
             case FcitxKey_Page_Down: {
+                bool advancedPage = false;
                 if (sym == FcitxKey_Page_Up && state->page > 0) {
                     state->page--;
                 } else if (sym == FcitxKey_Page_Down &&
                            state->page < totalPages - 1) {
                     state->page++;
-                } else if (sym == FcitxKey_Page_Down && candidatesFresh(state) &&
-                           state->moreFetchStartIndex < 0 &&
-                           static_cast<int>(state->candidates.size()) ==
-                               state->candidatesNum) {
-                    // Paging past the last available candidate: fetch more for
-                    // the next page (see FcitxKey_Down above for rationale).
-                    const int targetIndex =
-                        static_cast<int>(state->candidates.size());
-                    dispatchRequest(
-                        ic, state,
-                        nextCandidateFetchLimit(state->candidatesNum),
-                        targetIndex, true);
+                    advancedPage = true;
                 }
                 const int pageStart = state->page * perPage;
                 const int pageEnd =
@@ -827,6 +846,12 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                              static_cast<int>(state->candidates.size()));
                 state->cursor = std::min(state->cursor, pageEnd - pageStart - 1);
                 if (state->cursor < 0) state->cursor = 0;
+                const bool fillingPage =
+                    sym == FcitxKey_Page_Down && fillPartialPage();
+                if (sym == FcitxKey_Page_Down && !advancedPage &&
+                    !fillingPage && state->page == totalPages - 1) {
+                    requestMore(static_cast<int>(state->candidates.size()));
+                }
                 renderPanel(ic);
                 keyEvent.filterAndAccept();
                 return;

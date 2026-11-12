@@ -36,4 +36,28 @@ int main() {
         nextCandidateFetchLimit(18) != 27) {
         return 5;
     }
+
+    // Entering an under-filled last page requests more as soon as it becomes
+    // visible, rather than waiting for another Down key at the page bottom.
+    if (!shouldFetchMoreToFillPage(9, 9, 1, 5, false, true) ||
+        !shouldFetchMoreToFillPage(9, 9, 2, 4, false, true) ||
+        !shouldFetchMoreToFillPage(9, 9, 1, 7, false, true) ||
+        !shouldFetchMoreToFillPage(18, 18, 3, 5, false, true)) {
+        return 6;
+    }
+
+    if (shouldFetchMoreToFillPage(9, 9, 0, 5, false, true) ||
+        shouldFetchMoreToFillPage(9, 9, 8, 1, false, true) ||
+        shouldFetchMoreToFillPage(10, 18, 1, 5, false, true) ||
+        shouldFetchMoreToFillPage(9, 9, 1, 5, true, true) ||
+        shouldFetchMoreToFillPage(9, 9, 1, 5, false, false) ||
+        shouldFetchMoreToFillPage(8, 9, 1, 5, false, true)) {
+        return 7;
+    }
+
+    // Fetching to fill page two keeps the highlight at its first row; the
+    // fetch frontier (candidate 10) is tracked independently.
+    if (candidatePageAndCursor(5, 5) != std::pair<int, int>{1, 0}) {
+        return 8;
+    }
 }

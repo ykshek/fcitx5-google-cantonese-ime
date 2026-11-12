@@ -18,3 +18,16 @@ inline std::pair<int, int> candidatePageAndCursor(int candidateIndex,
 inline int nextCandidateFetchLimit(int requestedLimit) {
     return requestedLimit + kCandidateFetchBatchSize;
 }
+
+inline bool shouldFetchMoreToFillPage(int candidateCount, int requestedLimit,
+                                      int page, int visibleCount,
+                                      bool fetchInFlight, bool candidatesFresh) {
+    if (!candidatesFresh || fetchInFlight || candidateCount <= 0 ||
+        candidateCount != requestedLimit || page < 0 || visibleCount <= 0) {
+        return false;
+    }
+
+    const int pageStart = page * visibleCount;
+    return pageStart < candidateCount &&
+           pageStart + visibleCount > candidateCount;
+}
