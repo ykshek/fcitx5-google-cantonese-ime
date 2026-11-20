@@ -28,7 +28,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y flatpak
 
       - name: Install Flatpak Builder
-        run: flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
+        # The runner has no flathub remote by default.
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
 
       - name: Prepare source archive
         # The manifest references flatpak/source.tar.gz, whose entries sit
