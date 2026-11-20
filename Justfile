@@ -1,9 +1,9 @@
 # Justfile with convenient tasks to build and install the Fcitx5 Flatpak add-on.
 
-# Quick test: query Google Input Tools directly and print the raw JSON response.
+# Query Google Input Tools directly and print the raw JSON response.
 # Useful for checking network access and the itc code without building.
 query-google q:
-    @curl -sS "https://inputtools.google.com/request?text={{q}}&itc=yue-hant-t-i0-und&num=8"
+    @curl -fsS "https://inputtools.google.com/request?text={{q}}&itc=yue-hant-t-i0-und&num=8"
 
 install-flatpak-builder:
     flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
@@ -11,12 +11,10 @@ install-flatpak-builder:
 build-flatpak: install-flatpak-builder
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf build
-    rm -rf builddir
-    rm -rf .flatpak-builder
+    rm -rf build builddir .flatpak-builder
+    mkdir -p build
     source_archive=flatpak/source.tar.gz
     trap 'rm -f "$source_archive"' EXIT
-    mkdir -p build
     tar -czf "$source_archive" --transform='s,^,source/,' \
         CMakeLists.txt LICENSE data src tests \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
@@ -27,7 +25,7 @@ build-flatpak: install-flatpak-builder
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
     flatpak_files=builddir/files
     if [[ ! -f "$flatpak_files/lib/fcitx5/libfcitx5-google-ime.so" ]]; then
-        echo "Error: Flatpak add-on library was not installed under lib/fcitx5"
+        echo "Error: Flatpak add-on library was not installed under lib/fcitx5" >&2
         exit 1
     fi
     test ! -e "$flatpak_files/lib64/fcitx5/libfcitx5-google-ime.so"
@@ -106,15 +104,13 @@ install-tray-icon:
         gtk-update-icon-cache -f -t "$data_home/icons/hicolor" >/dev/null 2>&1 || true
     fi
 
-install-flatpak: install-flatpak-builder
+install-flatpak:
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf build
-    rm -rf builddir
-    rm -rf .flatpak-builder
+    rm -rf build builddir .flatpak-builder
+    mkdir -p build
     source_archive=flatpak/source.tar.gz
     trap 'rm -f "$source_archive"' EXIT
-    mkdir -p build
     tar -czf "$source_archive" --transform='s,^,source/,' \
         CMakeLists.txt LICENSE data src tests \
         flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
@@ -132,43 +128,57 @@ install-flatpak: install-flatpak-builder
     echo
     echo "Restart fcitx5 so it loads the new add-on: flatpak kill org.fcitx.Fcitx5"
 
-bump-version version:
+# Update the version in CMakeLists.txt and AppStream metadata, then commit.
+#
+# Usage:
+#   just bump            # increment PATCH by one from CMakeLists.txt
+#   just bump 1.2.3      # set an explicit version
+bump version="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     VERSION="{{version}}"
 
-    # Validate version format (should be like 1.2.3)
+    if [[ -z "$VERSION" ]]; then
+        current=$(grep -E '^project\(' CMakeLists.txt \
+            | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+            | awk '{print $2}')
+        if [[ -z "$current" ]]; then
+            echo "Error: could not determine the current version from CMakeLists.txt" >&2
+            exit 1
+        fi
+        IFS=. read -r major minor patch <<< "$current"
+        VERSION="$major.$minor.$((patch + 1))"
+        echo "No version given; bumping PATCH to $VERSION"
+    fi
+
     if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        echo "Error: Version must be in format X.Y.Z (e.g. 1.2.3)"
+        echo "Error: Version must be in format X.Y.Z (e.g. 1.2.3)" >&2
         exit 1
     fi
 
     echo "Bumping version to $VERSION..."
 
-    # Check if working directory is clean
     if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo "Error: Working directory is not clean. Please commit or stash changes first."
-        git status --porcelain
+        echo "Error: Working directory is not clean. Please commit or stash changes first." >&2
+        git status --porcelain >&2
         exit 1
     fi
 
     METADATA=flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.metainfo.xml
     RELEASE_DATE=$(date -u +%F)
     if ! grep -q '^<component ' "$METADATA" || ! grep -q '</component>' "$METADATA"; then
-        echo "Error: Invalid AppStream metadata in $METADATA"
+        echo "Error: Invalid AppStream metadata in $METADATA" >&2
         exit 1
     fi
     if grep -q "<release version=\"$VERSION\"" "$METADATA"; then
-        echo "Error: Version $VERSION already exists in $METADATA"
+        echo "Error: Version $VERSION already exists in $METADATA" >&2
         exit 1
     fi
 
-    # Update the version in CMakeLists.txt (project(... VERSION ...))
     echo "Updating version in CMakeLists.txt..."
     sed -i -E "s/(project\(fcitx5-google-cantonese-ime VERSION )[^ ]+/\1$VERSION/" CMakeLists.txt
 
-    # Record the Flatpak release in its AppStream metadata.
     echo "Updating version in $METADATA..."
     if grep -q '<releases>' "$METADATA"; then
         sed -i "/<releases>/a\\    <release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>" "$METADATA"
@@ -176,13 +186,15 @@ bump-version version:
         sed -i "/<\/component>/i\\  <releases>\\n    <release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>\\n  </releases>" "$METADATA"
     fi
 
-    # Verify the changes were made
-    if ! grep -q "VERSION $VERSION" CMakeLists.txt; then
-        echo "Error: Failed to update version in CMakeLists.txt"
+    updated=$(grep -E '^project\(' CMakeLists.txt \
+        | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+        | awk '{print $2}')
+    if [[ "$updated" != "$VERSION" ]]; then
+        echo "Error: Failed to update version in CMakeLists.txt" >&2
         exit 1
     fi
     if ! grep -q "<release version=\"$VERSION\" date=\"$RELEASE_DATE\"/>" "$METADATA"; then
-        echo "Error: Failed to update version in $METADATA"
+        echo "Error: Failed to update version in $METADATA" >&2
         exit 1
     fi
 
@@ -191,28 +203,61 @@ bump-version version:
     git add CMakeLists.txt "$METADATA"
     git commit -m "chore: bump version to v$VERSION"
 
-commit version:
+# Push HEAD and tag the release.
+#
+# Usage:
+#   just commit           # increment PATCH by one from the latest vX.Y.Z tag
+#   just commit 1.2.3     # tag an explicit version
+commit version="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     VERSION="{{version}}"
 
-    # Validate version format (should be like 1.2.3)
+    if [[ -z "$VERSION" ]]; then
+        latest_tag=$(git tag --list 'v*' --sort=-v:refname | sed -n '1p')
+        if [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            current=${latest_tag#v}
+        else
+            current=$(grep -E '^project\(' CMakeLists.txt \
+                | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+                | awk '{print $2}')
+        fi
+        if [[ -z "$current" ]]; then
+            echo "Error: could not determine the current version" >&2
+            exit 1
+        fi
+        IFS=. read -r major minor patch <<< "$current"
+        VERSION="$major.$minor.$((patch + 1))"
+        echo "No version given; tagging PATCH $VERSION"
+    fi
+
     if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        echo "Error: Version must be in format X.Y.Z (e.g. 1.2.3)"
+        echo "Error: Version must be in format X.Y.Z (e.g. 1.2.3)" >&2
         exit 1
     fi
 
-    echo "Bumping version to $VERSION..."
-
-    # Check if working directory is clean
     if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo "Error: Working directory is not clean. Please commit or stash changes first."
-        git status --porcelain
+        echo "Error: Working directory is not clean. Please commit or stash changes first." >&2
+        git status --porcelain >&2
         exit 1
     fi
 
-    git push origin HEAD
+    cmake_version=$(grep -E '^project\(' CMakeLists.txt \
+        | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+        | awk '{print $2}')
+    if [[ "$cmake_version" != "$VERSION" ]]; then
+        echo "Error: CMakeLists.txt declares version '$cmake_version', not '$VERSION'." >&2
+        echo "Run 'just bump' first, or pass the version explicitly." >&2
+        exit 1
+    fi
 
+    if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+        echo "Error: Tag v$VERSION already exists" >&2
+        exit 1
+    fi
+
+    echo "Tagging v$VERSION..."
+    git push origin HEAD
     git tag "v$VERSION"
     git push origin "v$VERSION"
