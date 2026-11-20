@@ -16,7 +16,7 @@ jobs:
   # ── CI gate: build on every push to main, but never on tags ──────────────
   ci-check:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref_type != 'tag'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/flatpak-setup
@@ -101,9 +101,9 @@ jobs:
             <h1>Google Cantonese IME</h1>
             <p>A Cantonese input method for fcitx5 that sends romanized input to Google Input Tools over HTTPS. This site hosts the signed Flatpak repository for <strong>fcitx5-google-cantonese-ime</strong>.</p>
             <h2>Add the remote (once)</h2>
-            <pre>flatpak remote-add --if-not-exists google-ime ${BASE}/index.flatpakrepo</pre>
+            <pre>flatpak --user remote-add --if-not-exists google-ime ${BASE}/index.flatpakrepo</pre>
             <h2>Install</h2>
-            <pre>flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME</pre>
+            <pre>flatpak --user install google-ime org.fcitx.Fcitx5.Addon.GoogleIME</pre>
             <p>Single-file bundles for each release are also published on GitHub releases.</p>
           </body>
           </html>
@@ -131,10 +131,10 @@ jobs:
 
           \`\`\`bash
           # Add the repository (one-time setup)
-          flatpak remote-add --if-not-exists google-ime https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
+          flatpak --user remote-add --if-not-exists google-ime https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
 
           # Install
-          flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME
+          flatpak --user install google-ime org.fcitx.Fcitx5.Addon.GoogleIME
           \`\`\`
 
           The Fcitx5 Flatpak runtime from Flathub must be installed. Restart Fcitx5 and enable the Google IME add-on/input method after installation:
