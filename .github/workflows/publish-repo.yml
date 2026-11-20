@@ -24,14 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install flatpak
-        run: sudo apt-get update && sudo apt-get install -y flatpak
+      - name: Install Flatpak build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
 
-      - name: Install Flatpak Builder
-        # The runner has no flathub remote by default.
+      - name: Install Flatpak build runtimes
+        # The runner has no flathub remote by default, and pre-installing the
+        # SDK/runtime keeps flatpak-builder from running host-side installs
+        # that need a D-Bus session.
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive --assumeyes flathub org.flatpak.Builder
+          flatpak install --user --noninteractive --assumeyes flathub \
+            org.kde.Sdk//6.11 \
+            org.fcitx.Fcitx5//stable
 
       - name: Prepare source archive
         # The manifest references flatpak/source.tar.gz, whose entries sit
@@ -54,13 +60,13 @@ jobs:
 
       - name: Build the repository
         run: |
-          flatpak run --command=flathub-build org.flatpak.Builder \
-            --user --force-clean --disable-cache --disable-rofiles-fuse \
+          mkdir -p build
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --install-deps-from=flathub \
             --repo=build/flatpak-repo \
-            flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
+            build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
           test -f build/flatpak-repo/config
-          test -f builddir/files/lib/fcitx5/libfcitx5-google-ime.so
+          test -f build/flatpak/files/lib/fcitx5/libfcitx5-google-ime.so
 
       - name: Sign the repository
         # Signing happens on the runner, not inside the builder sandbox:
