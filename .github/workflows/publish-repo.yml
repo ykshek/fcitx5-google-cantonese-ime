@@ -59,10 +59,14 @@ jobs:
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Build the repository
+        # --gpg-sign signs the exported commit; build-update-repo below only
+        # signs the summary. Without a commit signature, clients with
+        # gpg-verify enabled refuse the pull.
         run: |
           mkdir -p build
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --install-deps-from=flathub \
+            --gpg-sign="$GPG_FPR" --gpg-homedir="$GNUPGHOME" \
             --repo=build/flatpak-repo \
             build/flatpak flatpak/org.fcitx.Fcitx5.Addon.GoogleIME.yml
           test -f build/flatpak-repo/config
