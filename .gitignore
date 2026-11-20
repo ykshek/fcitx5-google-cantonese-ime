@@ -2,3 +2,4 @@ build
 builddir
 flatpak/source.tar.gz
 .flatpak-builder
+secrets/
