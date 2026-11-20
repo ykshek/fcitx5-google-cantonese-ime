@@ -330,6 +330,13 @@ private:
     // candidate.
     bool candidatesFresh(const GoogleIMEState *state) const;
 
+    // True when the input panel currently shows a candidate list — i.e. what
+    // renderPanel() would attach to the panel right now (an active preedit
+    // AND at least one candidate). keyEvent() uses this so navigation keys
+    // are consumed only while the list is actually visible, and pass through
+    // to the client otherwise.
+    bool candidateListVisible(const GoogleIMEState *state) const;
+
     // Emit one full-width punctuation character (see kPunctuationMap in
     // engine.cc). If there is an active composition, first resolves it: picks
     // the best full-consumption candidate if one is available, otherwise

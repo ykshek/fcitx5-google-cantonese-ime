@@ -171,6 +171,14 @@ bool GoogleIMEEngine::candidatesFresh(const GoogleIMEState *state) const {
            state->candidatesConfigGeneration == configGeneration_.load();
 }
 
+bool GoogleIMEEngine::candidateListVisible(const GoogleIMEState *state) const {
+    // Mirrors renderPanel(): a candidate list is attached to the panel iff
+    // there is an active preedit AND at least one candidate exists (the page
+    // is always clamped into range, so any non-empty list yields >= 1 row).
+    return state != nullptr && !state->preedit.empty() &&
+           !state->candidates.empty();
+}
+
 void GoogleIMEEngine::syncCandidatePageSize(GoogleIMEState *state) const {
     const int pageSize = visibleCandidateCount();
     if (state->displayedPageSize == pageSize) return;
@@ -212,6 +220,16 @@ void GoogleIMEEngine::selectCandidate(fcitx::InputContext *ic,
         if (ml > 0) state->preedit.erase(0, ml);
         state->page = 0;
         state->cursor = 0;
+        if (state->preedit.empty()) {
+            // The selection consumed the whole composition: the panel is
+            // about to be hidden, so drop the candidate list too. This keeps
+            // "panel hidden" equivalent to "no candidates in state", which
+            // candidateListVisible() and the keyEvent fall-through rely on —
+            // without it, Up/Down (and digit keys) would keep being consumed
+            // against a stale, invisible list after every commit.
+            state->candidates.clear();
+            state->candidatesProbe.clear();
+        }
     }
     if (ic) {
         if (!text.empty()) ic->commitString(text);
@@ -752,8 +770,15 @@ void GoogleIMEEngine::keyEvent(const fcitx::InputMethodEntry &entry,
         // Fall through: the current key is now handled against fresh state.
     }
 
-    // --- Candidate navigation (only meaningful when there are candidates) ---
-    if (!state->candidates.empty() && state->cursor >= 0) {
+    // --- Candidate navigation: only while the candidate list is actually
+    // visible on the panel. Otherwise arrows must reach the client (moving
+    // the cursor in the editor), so we fall through and do NOT accept.
+    //
+    // Gating on candidateListVisible() — not merely !candidates.empty() — is
+    // what stops arrows from being swallowed after a selection consumes the
+    // whole preedit: the panel is hidden then, and renderPanel's rule (not
+    // the raw vector) is the source of truth for visibility.
+    if (candidateListVisible(state) && state->cursor >= 0) {
         const int perPage = visibleCandidateCount();
         const int totalPages = candidatePageCount(
             static_cast<int>(state->candidates.size()), perPage);
