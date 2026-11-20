@@ -85,13 +85,14 @@ jobs:
         env:
           BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
+          BASE="${BASE_URL%/}"
           PUB=$(gpg --export --armor "$GPG_FPR" | base64 -w0)
           mkdir -p site
           cp -a build/flatpak-repo site/repo
           printf '%s\n' \
             '[Flatpak Repo]' \
             'Title=Google Cantonese IME' \
-            "Url=${BASE_URL}repo" \
+            "Url=${BASE}/repo" \
             'Comment=fcitx5 add-on: Cantonese input method using Google Input Tools' \
             "GPGKey=${PUB}" > site/index.flatpakrepo
           cat > site/index.html <<EOF
@@ -110,7 +111,7 @@ jobs:
             <a href="https://github.com/ykshek/fcitx5-google-cantonese-ime">fcitx5-google-cantonese-ime</a>.</p>
 
             <h2>Add the remote (once)</h2>
-            <pre>flatpak remote-add --if-not-exists google-ime ${BASE_URL}index.flatpakrepo</pre>
+            <pre>flatpak remote-add --if-not-exists google-ime ${BASE}/index.flatpakrepo</pre>
 
             <h2>Install</h2>
             <p>The Fcitx5 Flatpak (org.fcitx.Fcitx5) must be installed first.</p>
