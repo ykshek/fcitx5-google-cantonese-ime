@@ -121,6 +121,8 @@ jobs:
 
         ## Installation (Fcitx5 Flatpak)
 
+        ### GitHub Releases bundle
+
         Download and install the Flatpak add-on bundle for your user:
 
         \`\`\`bash
@@ -132,6 +134,20 @@ jobs:
 
         \`\`\`bash
         flatpak kill org.fcitx.Fcitx5
+        \`\`\`
+
+        ### GitHub Pages repository
+
+        A signed Flatpak repository is published to [GitHub Pages](https://ykshek.github.io/fcitx5-google-cantonese-ime/).
+        Add the remote once and then install or update with plain `flatpak install`:
+
+        \`\`\`bash
+        # Add the repository (one-time setup)
+        flatpak remote-add --if-not-exists google-ime \\
+          https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
+
+        # Install
+        flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME
         \`\`\`
 
         ## Verification

@@ -84,8 +84,29 @@ running instance keeps using the previous extension:
 flatpak kill org.fcitx.Fcitx5   # start it again the way you normally do
 ```
 
-Tagged releases publish an installable Flatpak bundle and `SHA256SUMS` on the
-GitHub Releases page. Install a downloaded bundle with:
+#### GitHub Pages repository
+
+A signed Flatpak repository is published to [GitHub Pages](https://ykshek.github.io/fcitx5-google-cantonese-ime/).
+Add the remote once and then install or update with plain `flatpak install`:
+
+```bash
+# Add the repository (one-time setup)
+flatpak remote-add --if-not-exists google-ime \
+  https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
+
+# Install (requires org.fcitx.Fcitx5 to be installed first)
+flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME
+```
+
+The repository is automatically rebuilt on every push to `main` and on a daily
+cron schedule, so it always contains the latest development version. It is signed
+with a GPG key embedded in the `index.flatpakrepo` file.
+
+#### GitHub Releases bundles
+
+Tagged releases also publish an installable Flatpak bundle and `SHA256SUMS` on
+the [GitHub Releases page](https://github.com/ykshek/fcitx5-google-cantonese-ime/releases).
+Install a downloaded bundle with:
 
 ```bash
 flatpak install --user ./org.fcitx.Fcitx5.Addon.GoogleIME-VERSION-x86_64.flatpak
