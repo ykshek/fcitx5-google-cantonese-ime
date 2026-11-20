@@ -1,17 +1,10 @@
-# Build, publish signed repo to GitHub Pages, and create GitHub Releases.
-#
-# Consolidates the former build.yml, publish-repo.yml, and release.yml into
-# a single workflow with conditionally-triggered jobs.  The daily cron is
-# removed — the repo only refreshes on real pushes to main.
 name: Build & Publish Flatpak Add-on
 
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [main]
+    tags: ['v*']
+  # optional: allow manual runs for testing
   workflow_dispatch:
 
 permissions:
@@ -20,28 +13,30 @@ permissions:
   id-token: write
 
 jobs:
-  # ── CI gate (push to main + PRs) ──────────────────────────────────────
+  # ── CI gate: build on every push to main, but never on tags ──────────────
   ci-check:
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/main'))
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/flatpak-setup
       - uses: ./.github/actions/flatpak-build
 
-  # ── Publish signed repo to GitHub Pages (tags + dispatch only) ────────
-  publish-repo:
+  # ── Release: build, create GitHub Release, publish to GitHub Pages ──────
+  release:
     runs-on: ubuntu-latest
-    if: >-
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # needed for creating a release
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/flatpak-setup
 
-      - name: Import signing key
+      - name: Set up Flatpak build environment
+        uses: ./.github/actions/flatpak-setup
+
+      - name: Import GPG signing key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -52,23 +47,39 @@ jobs:
           echo "GPG_FPR=$FPR" >> "$GITHUB_ENV"
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
-      - uses: ./.github/actions/flatpak-build
+      - name: Build Flatpak add‑on (signed)
+        uses: ./.github/actions/flatpak-build
         with:
           gpg-sign: ${{ env.GPG_FPR }}
           gpg-home-dir: ${{ env.GNUPGHOME }}
+          build-bundle: true
+          bundle-output-path: release-artifacts/org.fcitx.Fcitx5.Addon.GoogleIME-${{ steps.vars.outputs.version }}-x86_64.flatpak
 
-      - name: Sign the repository
+      - name: Set version
+        id: vars
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(sed -nE 's/^project\(fcitx5-google-cantonese-ime VERSION ([^ )]+).*/\1/p' CMakeLists.txt)
+          fi
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the Flatpak repository
         run: |
           flatpak build-update-repo \
-            --gpg-sign="$GPG_FPR" --gpg-homedir="$GNUPGHOME" \
+            --gpg-sign="$GPG_FPR" \
+            --gpg-homedir="$GNUPGHOME" \
             --title="Google Cantonese IME" \
             --comment="fcitx5 add-on: Cantonese input method using Google Input Tools" \
             build/flatpak-repo
 
-      - id: pages
+      - name: Configure GitHub Pages
+        id: pages
         uses: actions/configure-pages@v4
 
-      - name: Assemble site
+      - name: Assemble Pages site
         env:
           BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
@@ -83,71 +94,28 @@ jobs:
             'Comment=fcitx5 add-on: Cantonese input method using Google Input Tools' \
             "GPGKey=${PUB}" > site/index.flatpakrepo
           cat > site/index.html <<EOF
-          <!doctype html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Google Cantonese IME — Flatpak repository</title>
-          </head>
-          <body style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem;">
+          <!DOCTYPE html>
+          <html>
+          <head><title>Google Cantonese IME — Flatpak repository</title></head>
+          <body>
             <h1>Google Cantonese IME</h1>
-            <p>A Cantonese input method for fcitx5 that sends romanized input to
-            Google Input Tools over HTTPS. This site hosts the signed Flatpak
-            repository for
-            <a href="https://github.com/ykshek/fcitx5-google-cantonese-ime">fcitx5-google-cantonese-ime</a>.</p>
-
+            <p>A Cantonese input method for fcitx5 that sends romanized input to Google Input Tools over HTTPS. This site hosts the signed Flatpak repository for <strong>fcitx5-google-cantonese-ime</strong>.</p>
             <h2>Add the remote (once)</h2>
             <pre>flatpak remote-add --if-not-exists google-ime ${BASE}/index.flatpakrepo</pre>
-
             <h2>Install</h2>
-            <p>The Fcitx5 Flatpak (org.fcitx.Fcitx5) must be installed first.</p>
             <pre>flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME</pre>
-
-            <h2>After installing</h2>
-            <pre>flatpak kill org.fcitx.Fcitx5</pre>
-            <p>Then add "Google IME" in fcitx5's input method list.</p>
-
-            <p>Single-file bundles for each release are also published on
-            <a href="https://github.com/ykshek/fcitx5-google-cantonese-ime/releases">GitHub releases</a>.</p>
+            <p>Single-file bundles for each release are also published on GitHub releases.</p>
           </body>
           </html>
           EOF
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
-      - uses: actions/deploy-pages@v4
-
-  # ── Build bundle + create GitHub Release (tags + dispatch) ────────────
-  github-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: >-
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up version
-        id: vars
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION=$(sed -nE 's/^project\(fcitx5-google-cantonese-ime VERSION ([^ )]+).*/\1/p' CMakeLists.txt)
-          fi
-          test -n "$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/flatpak-setup
-
-      - uses: ./.github/actions/flatpak-build
-        with:
-          build-bundle: true
-          bundle-output-path: release-artifacts/org.fcitx.Fcitx5.Addon.GoogleIME-${{ steps.vars.outputs.version }}-x86_64.flatpak
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
 
       - name: Generate checksums
         run: |
@@ -157,46 +125,21 @@ jobs:
 
       - name: Generate release notes
         run: |
-          cat > release_notes.md << EOF
+          cat > release_notes.md <<EOF
           A self-contained fcitx5 engine that queries Google Input Tools over HTTPS.
-
-          ## Installation (Fcitx5 Flatpak)
-
-          ### GitHub Releases bundle
-
-          Download and install the Flatpak add-on bundle for your user:
-
-          \`\`\`bash
-          flatpak install --user ./org.fcitx.Fcitx5.Addon.GoogleIME-${{ steps.vars.outputs.version }}-x86_64.flatpak
-          \`\`\`
-
-          The Fcitx5 Flatpak runtime from Flathub must be installed. Restart Fcitx5
-          and enable the Google IME add-on/input method after installation:
-
-          \`\`\`bash
-          flatpak kill org.fcitx.Fcitx5
-          \`\`\`
-
-          ### GitHub Pages repository
-
-          A signed Flatpak repository is published to [GitHub Pages](https://ykshek.github.io/fcitx5-google-cantonese-ime/).
-          Add the remote once and then install or update with plain `flatpak install`:
+          A signed Flatpak repository is published to [GitHub Pages](https://ykshek.github.io/fcitx5-google-cantonese-ime/). Add the remote once and then install or update with plain \`flatpak install\`:
 
           \`\`\`bash
           # Add the repository (one-time setup)
-          flatpak remote-add --if-not-exists google-ime \\
-            https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
+          flatpak remote-add --if-not-exists google-ime https://ykshek.github.io/fcitx5-google-cantonese-ime/index.flatpakrepo
 
           # Install
           flatpak install google-ime org.fcitx.Fcitx5.Addon.GoogleIME
           \`\`\`
 
-          ## Verification
-
-          Verify the integrity of downloaded files:
-
+          The Fcitx5 Flatpak runtime from Flathub must be installed. Restart Fcitx5 and enable the Google IME add-on/input method after installation:
           \`\`\`bash
-          sha256sum -c SHA256SUMS
+          flatpak kill org.fcitx.Fcitx5
           \`\`\`
           EOF
 
@@ -212,7 +155,7 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Update latest tag
+      - name: Update latest tag (optional)
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"

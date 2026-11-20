@@ -1,26 +1,26 @@
-# Install Flatpak build tools and required runtimes.
-#
-# Uses system-level installs (sudo) because GitHub Actions runners have no
-# persistent user session, which causes `--user` flatpak commands to fail.
 name: "Setup Flatpak Build Environment"
-description: "Install flatpak tools and KDE/Fcitx5 runtimes"
+description: "Prepare a user-level Flathub remote"
 
 runs:
   using: "composite"
   steps:
-    - name: Install Flatpak build tools
+    - name: Configure user-level Flathub remote
       run: |
-        sudo apt-get update
-        sudo apt-get install -y flatpak flatpak-builder
-      shell: bash
+        set -euo pipefail
 
-    - name: Install Flatpak build runtimes
-      # The runner has no flathub remote by default, and pre-installing the
-      # SDK/runtime keeps flatpak-builder from running host-side installs
-      # that need a D-Bus session.
-      run: |
-        sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-        sudo flatpak install -y --noninteractive flathub \
-          org.kde.Sdk//6.11 \
+        # Guard: if an image does not ship flatpak-builder, fall back to apt.
+        if ! command -v flatpak-builder >/dev/null 2>&1; then
+          echo "flatpak-builder not found; installing from apt"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak flatpak-builder
+        fi
+
+        flatpak --version
+        flatpak-builder --version
+
+        flatpak --user remote-add --if-not-exists \
+          flathub https://flathub.org/repo/flathub.flatpakrepo
+
+        flatpak --user install -y --noninteractive flathub \
           org.fcitx.Fcitx5//stable
       shell: bash
