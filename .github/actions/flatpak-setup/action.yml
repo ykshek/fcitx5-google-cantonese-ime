@@ -1,0 +1,26 @@
+# Install Flatpak build tools and required runtimes.
+#
+# This composite action is shared across build.yml, release.yml, and
+# publish-repo.yml to avoid duplicating the same apt + flatpak setup steps.
+name: "Setup Flatpak Build Environment"
+description: "Install flatpak tools and KDE/Fcitx5 runtimes"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Flatpak build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y flatpak flatpak-builder
+      shell: bash
+
+    - name: Install Flatpak build runtimes
+      # The runner has no flathub remote by default, and pre-installing the
+      # SDK/runtime keeps flatpak-builder from running host-side installs
+      # that need a D-Bus session.
+      run: |
+        flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        flatpak install --user --noninteractive --assumeyes flathub \
+          org.kde.Sdk//6.11 \
+          org.fcitx.Fcitx5//stable
+      shell: bash
